@@ -146,10 +146,11 @@ Then add four repository secrets (Settings → Secrets and variables → Actions
 | `XCURS_KEY_ALIAS`         | `xcurs`                                |
 | `XCURS_KEY_PASSWORD`      | the key password                       |
 
-**Release:**
+**Release:** on GitHub, open **Actions → Android release → Run workflow** and
+type a version like `0.7.0`. Or push a tag:
 
 ```bash
-git tag v0.5.0 && git push origin v0.5.0
+git tag v0.7.0 && git push origin v0.7.0
 ```
 
 Without the secrets the workflow still works, but signs with a throwaway key,

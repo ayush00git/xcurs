@@ -8,6 +8,9 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <title>xcurs</title>
+  <link rel="manifest" href="/static/manifest.json">
+  <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/static/icon.svg">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -17,6 +20,43 @@
     <div class="wordmark">xcurs</div>
     <div class="status" id="status"><span class="dot"></span><span class="label">connecting</span></div>
   </header>
+
+  <button id="menu" type="button" aria-label="Settings" aria-expanded="false" aria-controls="sheet">
+    <span></span><span></span><span></span>
+  </button>
+
+  <div id="sheet" aria-hidden="true">
+    <section class="panel" role="dialog" aria-label="Settings">
+      <div class="grip"></div>
+      <h2>settings</h2>
+
+      <label class="row">
+        <span class="name">sensitivity</span><output data-out="sens"></output>
+        <input type="range" data-key="sens" min="0.4" max="3" step="0.1">
+      </label>
+      <label class="row">
+        <span class="name">acceleration</span><output data-out="accel"></output>
+        <input type="range" data-key="accel" min="0" max="2" step="0.1">
+      </label>
+      <label class="row">
+        <span class="name">scroll speed</span><output data-out="scroll"></output>
+        <input type="range" data-key="scroll" min="0.3" max="3" step="0.1">
+      </label>
+      <label class="toggle">
+        <span class="name">natural scrolling</span>
+        <input type="checkbox" data-key="natural"><span class="switch"></span>
+      </label>
+      <label class="toggle">
+        <span class="name">haptics</span>
+        <input type="checkbox" data-key="haptics"><span class="switch"></span>
+      </label>
+
+      <div class="actions">
+        <button id="reset" type="button" class="ghost">reset</button>
+        <button id="done" type="button" class="solid">done</button>
+      </div>
+    </section>
+  </div>
 
   <footer id="hint">
     <span>tap · click</span>

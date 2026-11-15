@@ -54,3 +54,29 @@ def test_websocket_batch_and_release_on_disconnect():
     assert values(dev, e.REL_WHEEL) == [1]
     # held during the drag, then released when the phone went away
     assert values(dev, e.BTN_LEFT) == [1, 0]
+
+
+def test_websocket_requires_token():
+    async def run():
+        client = TestClient(TestServer(make_app(VirtualPointer(device=FakeDevice()), token="s3cret")))
+        await client.start_server()
+        try:
+            assert (await client.get("/check?t=nope")).status == 401
+            assert (await client.get("/check?t=s3cret")).status == 204
+            assert (await client.get("/ws?t=nope")).status == 401
+            ws = await client.ws_connect("/ws?t=s3cret")
+            await ws.close()
+        finally:
+            await client.close()
+
+    asyncio.run(run())
+
+
+def test_token_persists_and_rotates(tmp_path, monkeypatch):
+    from xcurs.pairing import load_token
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    first = load_token()
+    assert load_token() == first
+    assert (tmp_path / "xcurs" / "token").stat().st_mode & 0o777 == 0o600
+    assert load_token(rotate=True) != first

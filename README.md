@@ -54,3 +54,32 @@ xcurs --dry-run -v    # no /dev/uinput needed, logs events instead
 
 If the phone can't connect, allow the port through your firewall,
 e.g. `sudo ufw allow 8710/tcp`.
+
+## Phase 3: polish
+
+**Pairing.** On first run xcurs makes a secret token (`~/.config/xcurs/token`)
+and prints a QR code. Scan it once; the phone remembers the token. Without it
+the WebSocket is refused, so nobody else on the Wi-Fi can drive your mouse.
+
+```bash
+xcurs --pair        # show the QR again
+xcurs --new-token   # unpair every phone
+```
+
+**Settings.** Tap `···` on the phone for sensitivity, acceleration, scroll
+speed, natural scrolling and haptics. They're saved on the phone.
+Tip: use your browser's "Add to Home screen" to get a full-screen app.
+
+**Run at login** (systemd user service):
+
+```bash
+pipx install .                                   # puts xcurs in ~/.local/bin
+mkdir -p ~/.config/systemd/user
+cp packaging/xcurs.service ~/.config/systemd/user/
+systemctl --user enable --now xcurs
+journalctl --user -u xcurs -f                    # logs
+```
+
+## License
+
+Apache License 2.0. See [LICENSE](LICENSE).

@@ -1,4 +1,4 @@
-"""Phase 2: the thread between phone and laptop.
+"""The daemon: the thread between phone and laptop.
 
 The daemon serves the touchpad page over HTTP and listens on a WebSocket.
 The phone sends small JSON arrays, and each one becomes a mouse event:
@@ -21,6 +21,7 @@ from pathlib import Path
 
 from aiohttp import WSMsgType, web
 
+from .pairing import load_token, pair_url, print_pairing, token_ok
 from .pointer import BUTTONS, VirtualPointer
 
 log = logging.getLogger("xcurs")
@@ -28,6 +29,7 @@ log = logging.getLogger("xcurs")
 WEB_DIR = Path(__file__).parent / "web"
 MAX_STEP = 2000.0  # ignore absurd values instead of flinging the cursor away
 POINTER = web.AppKey("pointer", VirtualPointer)
+TOKEN = web.AppKey("token", str)  # empty string = pairing disabled
 
 
 def _number(v) -> float | None:
@@ -60,6 +62,9 @@ def handle_message(pointer: VirtualPointer, msg) -> bool:
 
 
 async def ws_handler(request: web.Request) -> web.WebSocketResponse:
+    if not _authorized(request):
+        log.warning("rejected unpaired phone: %s", request.remote)
+        raise web.HTTPUnauthorized()
     pointer = request.app[POINTER]
     ws = web.WebSocketResponse(heartbeat=10)
     await ws.prepare(request)
@@ -83,15 +88,27 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
     return ws
 
 
+def _authorized(request: web.Request) -> bool:
+    expected = request.app[TOKEN]
+    return not expected or token_ok(expected, request.query.get("t"))
+
+
+async def check(request: web.Request) -> web.Response:
+    """Lets the page tell "wrong token" apart from "laptop unreachable"."""
+    return web.Response(status=204 if _authorized(request) else 401)
+
+
 async def index(request: web.Request) -> web.FileResponse:
     return web.FileResponse(WEB_DIR / "index.html", headers={"Cache-Control": "no-cache"})
 
 
-def make_app(pointer: VirtualPointer) -> web.Application:
+def make_app(pointer: VirtualPointer, token: str = "") -> web.Application:
     app = web.Application()
     app[POINTER] = pointer
+    app[TOKEN] = token
     app.router.add_get("/", index)
     app.router.add_get("/ws", ws_handler)
+    app.router.add_get("/check", check)
     app.router.add_static("/static/", WEB_DIR)
 
     async def close_pointer(app: web.Application) -> None:
@@ -135,8 +152,17 @@ def main(argv=None) -> None:
     p.add_argument("--host", default="0.0.0.0")
     p.add_argument("--port", type=int, default=8710)
     p.add_argument("--dry-run", action="store_true", help="don't touch /dev/uinput, just log")
+    p.add_argument("--pair", action="store_true", help="show the pairing QR code and exit")
+    p.add_argument("--new-token", action="store_true", help="forget paired phones, make a new token")
+    p.add_argument("--no-auth", action="store_true", help="skip pairing (trusted networks only)")
     p.add_argument("-v", "--verbose", action="store_true")
     args = p.parse_args(argv)
+
+    token = "" if args.no_auth else load_token(rotate=args.new_token)
+    url = pair_url(lan_ip(), args.port, token) if token else f"http://{lan_ip()}:{args.port}/"
+    if args.pair:
+        print_pairing(url)
+        return
 
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
@@ -152,9 +178,8 @@ def main(argv=None) -> None:
             "See the README setup: modprobe uinput, the udev rule and the input group."
         )
 
-    url = f"http://{lan_ip()}:{args.port}/"
-    print(f"\n  xcurs is listening. Open this on your phone:\n\n    {url}\n")
-    web.run_app(make_app(pointer), host=args.host, port=args.port, print=None)
+    print_pairing(url)
+    web.run_app(make_app(pointer, token), host=args.host, port=args.port, print=None)
 
 
 if __name__ == "__main__":

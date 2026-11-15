@@ -19,8 +19,9 @@
   const PX_PER_NOTCH = 36;     // finger travel for one scroll notch, at scroll speed 1
   const TAP_MS = 230;          // a touch shorter than this...
   const TAP_SLOP = 10;         // ...that moved less than this (px) is a tap
-  const DOUBLE_TAP_MS = 300;   // tap, then touch again within this -> drag
+  const DOUBLE_TAP_MS = 250;   // tap, then touch again within this -> drag
   const DOUBLE_TAP_SLOP = 48;
+  const PX_TO_MM = 0.18;       // phone css px -> mm on the virtual touchpad (3/4-finger swipes)
 
   // ---- connection --------------------------------------------------------
   const statusEl = document.getElementById("status");
@@ -77,13 +78,15 @@
   // of touchmove events becomes one small packet. Clicks go out right away,
   // after any motion still waiting, so the order is never scrambled.
   let moveX = 0, moveY = 0, scrollX = 0, scrollY = 0;
+  let swipeFingers = 0, swipeX = 0, swipeY = 0;   // a 3/4-finger desktop gesture
 
   function flush(extra) {
     const batch = [];
     if (moveX || moveY) batch.push(["m", round2(moveX), round2(moveY)]);
     if (scrollX || scrollY) batch.push(["s", round2(scrollX), round2(scrollY)]);
+    if (swipeFingers && (swipeX || swipeY)) batch.push(["t", swipeFingers, round2(swipeX), round2(swipeY)]);
     if (extra) batch.push(extra);
-    moveX = moveY = scrollX = scrollY = 0;
+    moveX = moveY = scrollX = scrollY = swipeX = swipeY = 0;
     if (batch.length && ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(batch));
     }
@@ -98,6 +101,7 @@
   const touches = new Map();   // id -> {x, y}
   let gesture = null;          // the current run of touches, first down to last up
   let lastTap = null;          // {t, x, y} of the last one-finger tap
+  let pendingClick = null;     // that tap's click, held back in case it becomes a drag
   let dragging = false;
   let lastMoveT = 0;
 
@@ -107,6 +111,30 @@
     const speed = dist / Math.max(dt, 1);              // px per ms
     const boost = Math.max(0, Math.min(speed, 3) - 0.15);
     return settings.sens * (1 + settings.accel * boost);
+  }
+
+  // A single tap's click waits DOUBLE_TAP_MS before it's sent, like on a
+  // laptop touchpad. If a finger comes back in that time, the tap was the
+  // start of a drag ("tap, then touch and hold"), so nothing gets clicked.
+  function holdClick() {
+    pendingClick = setTimeout(() => {
+      pendingClick = null;
+      flush(["c", "left"]);
+    }, DOUBLE_TAP_MS);
+  }
+
+  function sendPendingClickNow() {
+    if (!pendingClick) return;
+    clearTimeout(pendingClick);
+    pendingClick = null;
+    flush(["c", "left"]);
+  }
+
+  function endSwipe() {
+    if (!swipeFingers) return;
+    flush();
+    swipeFingers = 0;
+    flush(["t", 0, 0, 0]);
   }
 
   function onStart(e) {
@@ -119,11 +147,16 @@
       if (touches.size === 0) {
         gesture = { t0: now, max: 0, travel: 0, x: t.clientX, y: t.clientY };
         const near = lastTap && Math.hypot(t.clientX - lastTap.x, t.clientY - lastTap.y) < DOUBLE_TAP_SLOP;
-        if (near && now - lastTap.t < DOUBLE_TAP_MS) {
+        if (near && pendingClick && now - lastTap.t < DOUBLE_TAP_MS) {
+          // Tap, then touch again: a drag. The held-back click is dropped.
+          clearTimeout(pendingClick);
+          pendingClick = null;
           dragging = true;
           flush(["d", "left"]);
           fx.dragStart(t.identifier);
           buzz(12);
+        } else {
+          sendPendingClickNow(); // some other gesture: let the earlier tap click first
         }
       }
       touches.set(t.identifier, { x: t.clientX, y: t.clientY });
@@ -150,7 +183,20 @@
     const dt = now - lastMoveT;
     lastMoveT = now;
 
-    if (touches.size >= 2) {
+    if (touches.size >= 3 && !dragging) {
+      // Three or four fingers: a desktop gesture (switch workspace, overview,
+      // ...). Once they've clearly moved, play the swipe on the laptop's
+      // virtual touchpad and let the desktop decide what it means.
+      const fingers = Math.min(touches.size, 4);
+      if (fingers !== swipeFingers && gesture.travel > TAP_SLOP * fingers) {
+        endSwipe();
+        swipeFingers = fingers;
+      }
+      if (swipeFingers) {
+        swipeX += (sx / n) * PX_TO_MM;
+        swipeY += (sy / n) * PX_TO_MM;
+      }
+    } else if (touches.size === 2 && gesture.max < 3) {
       // Two fingers: scroll by their average motion. "Natural" means the
       // content follows the fingers. Kernel signs: +y is up, +x is right.
       const k = (settings.natural ? 1 : -1) * settings.scroll / PX_PER_NOTCH;
@@ -175,6 +221,8 @@
       fx.up(t.identifier);
       last = t;
     }
+    // Lifting below three fingers ends a desktop gesture.
+    if (swipeFingers && touches.size < 3) endSwipe();
     if (touches.size > 0 || !gesture) return;
 
     document.body.classList.remove("touching");
@@ -184,13 +232,22 @@
       dragging = false;
       flush(["u", "left"]);
       lastTap = null;
-      if (isTap) fx.ripple(last.clientX, last.clientY, 1); // tap, tap = double click
+      if (isTap) {
+        // Tap, tap: the press and release above were the first click; add the
+        // second one, and it's a double click.
+        flush(["c", "left"]);
+        fx.ripple(last.clientX, last.clientY, 1);
+      }
     } else if (isTap) {
-      const button = ["left", "right", "middle"][Math.min(gesture.max, 3) - 1];
-      flush(["c", button]);
-      fx.ripple(gesture.x, gesture.y, Math.min(gesture.max, 3));
+      const fingers = Math.min(gesture.max, 3);
+      if (fingers === 1) {
+        holdClick();
+      } else {
+        flush(["c", fingers === 2 ? "right" : "middle"]);
+      }
+      fx.ripple(gesture.x, gesture.y, fingers);
       buzz(8);
-      lastTap = gesture.max === 1 ? { t: now, x: gesture.x, y: gesture.y } : null;
+      lastTap = fingers === 1 ? { t: now, x: gesture.x, y: gesture.y } : null;
     } else {
       lastTap = null;
     }

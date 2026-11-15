@@ -34,3 +34,23 @@ pytest                          # unit tests, no /dev/uinput needed
 
 While the demo runs, `libinput list-devices` (or `cat /proc/bus/input/devices`)
 shows a new device called **xcurs virtual pointer**.
+
+## Phase 2: the thread
+
+```bash
+pip install -e '.[dev]'
+xcurs                 # prints a URL; open it on your phone (same Wi-Fi)
+xcurs --dry-run -v    # no /dev/uinput needed, logs events instead
+```
+
+| Gesture on the phone      | On the laptop |
+|---------------------------|---------------|
+| one finger drag           | move cursor   |
+| tap                       | left click    |
+| two-finger tap            | right click   |
+| three-finger tap          | middle click  |
+| two-finger drag           | scroll        |
+| double-tap and hold, drag | click-drag    |
+
+If the phone can't connect, allow the port through your firewall,
+e.g. `sudo ufw allow 8710/tcp`.

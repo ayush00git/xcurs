@@ -10,6 +10,9 @@ The phone sends small JSON arrays, and each one becomes a mouse event:
     ["u", button]   release
     ["t", n, dx, dy] swipe n fingers (3 or 4) by dx, dy mm on the virtual
                     touchpad, for desktop gestures; ["t", 0, 0, 0] lifts them
+    ["k", text]     type text on the virtual keyboard
+    ["key", name, [mods]]  press a key ("enter", "left", "c", ...) with
+                    modifiers ("ctrl", "alt", "shift", "super")
 """
 
 from __future__ import annotations
@@ -33,6 +36,7 @@ from .pairing import (
     print_pairing,
     token_ok,
 )
+from .keyboard import VirtualKeyboard
 from .pointer import BUTTONS, VirtualPointer
 from .touchpad import VirtualTouchpad
 
@@ -42,6 +46,7 @@ WEB_DIR = Path(__file__).parent / "web"
 MAX_STEP = 2000.0  # ignore absurd values instead of flinging the cursor away
 POINTER = web.AppKey("pointer", VirtualPointer)
 TOUCHPAD = web.AppKey("touchpad", object)  # VirtualTouchpad, or None if unavailable
+KEYBOARD = web.AppKey("keyboard", object)  # VirtualKeyboard, or None if unavailable
 TOKEN = web.AppKey("token", str)  # empty string = pairing disabled
 WINDOW = web.AppKey("window", PairingWindow)
 MAX_NAME = 60
@@ -56,7 +61,12 @@ def _number(v) -> float | None:
     return max(-MAX_STEP, min(MAX_STEP, v))
 
 
-def handle_message(pointer: VirtualPointer, msg, touchpad: VirtualTouchpad | None = None) -> bool:
+def handle_message(
+    pointer: VirtualPointer,
+    msg,
+    touchpad: VirtualTouchpad | None = None,
+    keyboard: VirtualKeyboard | None = None,
+) -> bool:
     """Apply one message. Returns False if it was malformed."""
     if not isinstance(msg, list) or not msg:
         return False
@@ -81,6 +91,16 @@ def handle_message(pointer: VirtualPointer, msg, touchpad: VirtualTouchpad | Non
             touchpad.swipe(int(args[0]), dx, dy)
         return True
 
+    if kind == "k" and len(args) == 1 and isinstance(args[0], str):
+        if keyboard is not None:
+            keyboard.type_text(args[0])
+        return True
+
+    if kind == "key" and len(args) == 2 and isinstance(args[0], str) and isinstance(args[1], list):
+        if not all(isinstance(m, str) for m in args[1]):
+            return False
+        return keyboard.press(args[0], args[1]) if keyboard is not None else True
+
     return False
 
 
@@ -90,6 +110,7 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
         raise web.HTTPUnauthorized()
     pointer = request.app[POINTER]
     touchpad = request.app[TOUCHPAD]
+    keyboard = request.app[KEYBOARD]
     ws = web.WebSocketResponse(heartbeat=10)
     await ws.prepare(request)
     log.info("phone connected: %s", request.remote)
@@ -104,7 +125,7 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
             # A frame may carry one message or a batch of them.
             batch = msg if isinstance(msg, list) and msg and isinstance(msg[0], list) else [msg]
             for m in batch:
-                handle_message(pointer, m, touchpad)
+                handle_message(pointer, m, touchpad, keyboard)
     finally:
         # The phone vanished mid-drag? Don't leave a button or fingers down.
         pointer.release_all()
@@ -150,10 +171,12 @@ def make_app(
     token: str = "",
     window: PairingWindow | None = None,
     touchpad: VirtualTouchpad | None = None,
+    keyboard: VirtualKeyboard | None = None,
 ) -> web.Application:
     app = web.Application()
     app[POINTER] = pointer
     app[TOUCHPAD] = touchpad
+    app[KEYBOARD] = keyboard
     app[TOKEN] = token
     app[WINDOW] = window or PairingWindow(0)
     app.router.add_get("/", index)
@@ -164,8 +187,9 @@ def make_app(
 
     async def close_pointer(app: web.Application) -> None:
         app[POINTER].close()
-        if app[TOUCHPAD] is not None:
-            app[TOUCHPAD].close()
+        for extra in (app[TOUCHPAD], app[KEYBOARD]):
+            if extra is not None:
+                extra.close()
 
     app.on_cleanup.append(close_pointer)
     return app
@@ -249,6 +273,11 @@ def main(argv=None) -> None:
             touchpad = VirtualTouchpad(device=_LoggingDevice() if args.dry_run else None)
         except Exception as err:  # gestures are a bonus; the mouse still works
             log.warning("3/4-finger gestures unavailable: %s", err)
+    try:
+        keyboard = VirtualKeyboard(device=_LoggingDevice() if args.dry_run else None)
+    except Exception as err:  # typing is a bonus too
+        log.warning("keyboard unavailable: %s", err)
+        keyboard = None
 
     print_pairing(url)
     window = PairingWindow(args.pair_window, always=args.trust_wifi)
@@ -256,7 +285,7 @@ def main(argv=None) -> None:
         print("  Any phone on this Wi-Fi can pair (--trust-wifi).\n")
     elif token and window.is_open():
         print(f"  Or just open the xcurs app: pairing is open for {window.seconds_left()} s.\n")
-    app = make_app(pointer, token, window, touchpad)
+    app = make_app(pointer, token, window, touchpad, keyboard)
     if not args.no_mdns:
         Beacon(lan_ip(), args.port, token).attach(app)
     web.run_app(app, host=args.host, port=args.port, print=None)

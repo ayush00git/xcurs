@@ -7,6 +7,7 @@ name = "xcurs"
 version = "0.3.0"
 description = "Your phone, as a touchpad for your Linux laptop."
 readme = "README.md"
+license = {text = "Apache-2.0"}
 requires-python = ">=3.9"
 dependencies = ["evdev>=1.6", "aiohttp>=3.9", "qrcode>=7"]
 

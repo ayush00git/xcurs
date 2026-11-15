@@ -79,3 +79,7 @@ cp packaging/xcurs.service ~/.config/systemd/user/
 systemctl --user enable --now xcurs
 journalctl --user -u xcurs -f                    # logs
 ```
+
+## License
+
+Apache License 2.0. See [LICENSE](LICENSE).

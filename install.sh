@@ -131,15 +131,20 @@ install_xcurs() {
 
 open_firewall() {
     step "Letting the phone through the firewall"
+    # A firewall hiccup shouldn't stop the install: warn and carry on.
+    local ok=1
     if command -v ufw >/dev/null && systemctl is-active --quiet ufw 2>/dev/null; then
-        as_root ufw allow "$PORT/tcp" comment xcurs
-        as_root ufw allow 5353/udp comment "xcurs mDNS"
+        as_root ufw allow "$PORT/tcp" comment xcurs || ok=0
+        as_root ufw allow 5353/udp comment "xcurs mDNS" || ok=0
     elif command -v firewall-cmd >/dev/null && systemctl is-active --quiet firewalld 2>/dev/null; then
-        as_root firewall-cmd --permanent --add-port="$PORT/tcp" --add-service=mdns
-        as_root firewall-cmd --reload
+        # One option per call: older firewall-cmd refuses --add-port with --add-service.
+        as_root firewall-cmd --permanent --add-port="$PORT/tcp" || ok=0
+        as_root firewall-cmd --permanent --add-service=mdns || ok=0
+        as_root firewall-cmd --reload || ok=0
     else
         info "no active ufw or firewalld found, nothing to open"
     fi
+    ((ok)) || warn "couldn't open the firewall; if the phone can't find the laptop, see Troubleshooting in the README."
 }
 
 # ---- 5. background service --------------------------------------------------

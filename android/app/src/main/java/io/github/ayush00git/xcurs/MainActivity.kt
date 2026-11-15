@@ -120,7 +120,7 @@ class MainActivity : ComponentActivity() {
     // ---- flow --------------------------------------------------------------
 
     private fun connect() {
-        val token = store.token ?: return showPairing()
+        val token = store.token ?: return autoPair()
         show("finding your laptop", breathe = true)
         discovery.find(token) { found ->
             if (found != null) store.lastLaptop = found
@@ -145,6 +145,31 @@ class MainActivity : ComponentActivity() {
         web.animate().alpha(1f).setDuration(FADE_MS)
     }
 
+    /** First run: find any xcurs laptop on this Wi-Fi and ask it for the token. */
+    private fun autoPair() {
+        show("looking for your laptop", breathe = true)
+        discovery.all { found ->
+            if (found.isEmpty()) {
+                showPairing("no laptop found\nrun xcurs on it, on the same wi-fi")
+                return@all
+            }
+            AutoPair.tryAll(found.map { it.laptop }) { result ->
+                when (result) {
+                    is AutoPair.Result.Paired -> {
+                        store.save(result.pairing)
+                        connect()
+                    }
+                    AutoPair.Result.Closed -> showPairing(
+                        "your laptop's pairing window is closed\nrestart xcurs there, then try again",
+                    )
+                    AutoPair.Result.Unreachable -> showPairing(
+                        "found your laptop but can't reach it\nallow port 8710 in its firewall",
+                    )
+                }
+            }
+        }
+    }
+
     private fun pair(text: String?) {
         val pairing = text?.let(PairingCodec::parse)
         if (pairing == null) {
@@ -161,7 +186,7 @@ class MainActivity : ComponentActivity() {
             .build()
         GmsBarcodeScanning.getClient(this, options).startScan()
             .addOnSuccessListener { pair(it.rawValue) }
-            .addOnFailureListener { toast("Scanner unavailable. Paste the link instead.") }
+            .addOnFailureListener { pasteDialog() }
     }
 
     private fun pasteDialog() {
@@ -239,10 +264,10 @@ class MainActivity : ComponentActivity() {
 
     // ---- screens -----------------------------------------------------------
 
-    private fun showPairing() = show(
-        "pair with your laptop\nrun xcurs there, then scan its qr",
-        primaryLabel = "scan qr", onPrimary = ::scan,
-        secondaryLabel = "paste link", onSecondary = ::pasteDialog,
+    private fun showPairing(message: String) = show(
+        message,
+        primaryLabel = "try again", onPrimary = ::autoPair,
+        secondaryLabel = "scan qr", onSecondary = ::scan,
     )
 
     private fun showNotFound() = show(
@@ -250,7 +275,7 @@ class MainActivity : ComponentActivity() {
         primaryLabel = "retry", onPrimary = ::connect,
         secondaryLabel = "pair again", onSecondary = {
             store.forget()
-            showPairing()
+            autoPair()
         },
     )
 

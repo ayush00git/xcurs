@@ -37,5 +37,6 @@ class PairingCodecTest {
     fun pairingIdMatchesTheLaptop() {
         // Same value xcurs/beacon.py computes: sha256("s3cret").hexdigest()[:16]
         assertEquals("1ec1c26b50d5d3c5", PairingCodec.pairingId("s3cret"))
+        assertEquals("", PairingCodec.pairingId("")) // a laptop running --no-auth
     }
 }

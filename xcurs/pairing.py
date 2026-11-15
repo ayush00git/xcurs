@@ -10,9 +10,13 @@ logs. The page reads it and remembers it.
 from __future__ import annotations
 
 import hmac
+import ipaddress
 import os
 import secrets
+import shutil
+import subprocess
 import sys
+import time
 from pathlib import Path
 
 
@@ -62,3 +66,46 @@ def print_pairing(url: str) -> None:
     except ImportError:
         pass
     print(f"\n  or open: {url}\n")
+
+
+class PairingWindow:
+    """V2.4: pairing without a QR code, like Bluetooth pairing mode.
+
+    While the window is open, the phone app can ask for the token
+    (POST /pair) and gets it, no scanning needed. It opens for a short time
+    when xcurs starts; after that only phones that already hold the token
+    can connect. ``always`` keeps it open, for trusted home networks.
+    """
+
+    def __init__(self, seconds: float, always: bool = False, clock=time.monotonic) -> None:
+        self._clock = clock
+        self.always = always
+        self.closes_at = clock() + max(seconds, 0)
+
+    def is_open(self) -> bool:
+        return self.always or self._clock() < self.closes_at
+
+    def seconds_left(self) -> int:
+        return max(0, round(self.closes_at - self._clock()))
+
+
+def is_local(address: str | None) -> bool:
+    """Only hand out the token to devices on the local network."""
+    try:
+        ip = ipaddress.ip_address((address or "").split("%")[0])
+    except ValueError:
+        return False
+    return ip.is_private or ip.is_link_local or ip.is_loopback
+
+
+def notify(title: str, body: str) -> None:
+    """A desktop notification, so a new phone never pairs silently."""
+    if shutil.which("notify-send"):
+        try:
+            subprocess.Popen(
+                ["notify-send", "--app-name=xcurs", title, body],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except OSError:
+            pass

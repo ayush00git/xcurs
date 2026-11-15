@@ -99,8 +99,9 @@ cd android
 adb install app/build/outputs/apk/debug/app-debug.apk
 ```
 
-**First run:** start `xcurs` on the laptop, open the app, tap **scan qr**.
-After that the app just finds the laptop by itself.
+**First run:** start `xcurs` on the laptop, then open the app within 2
+minutes. It finds the laptop and pairs by itself; no QR needed (the QR still
+works as a fallback). After that it just connects.
 
 If the app can't find the laptop, allow mDNS through the firewall
 (`sudo ufw allow 5353/udp`, or `sudo firewall-cmd --add-service=mdns`). The app
@@ -153,3 +154,19 @@ git tag v0.5.0 && git push origin v0.5.0
 
 Without the secrets the workflow still works, but signs with a throwaway key,
 so each release would need an uninstall first.
+
+## V2.4: pairing without a QR code
+
+For 2 minutes after `xcurs` starts (its *pairing window*, like Bluetooth
+pairing mode), the app can ask the laptop for the token over the Wi-Fi. You
+get a desktop notification whenever a phone pairs. After the window closes,
+only phones that already paired can connect, so strangers on the same Wi-Fi
+can't take over your mouse.
+
+```bash
+xcurs --pair-window 300   # keep it open for 5 minutes instead
+xcurs --pair-window 0     # QR only
+xcurs --trust-wifi        # always open: only on networks you trust
+```
+
+Running as a service? `systemctl --user restart xcurs` reopens the window.

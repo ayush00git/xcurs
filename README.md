@@ -2,156 +2,89 @@
 
 Your phone, as a touchpad for your Linux laptop.
 
-xcurs runs a tiny daemon on the laptop that creates a virtual mouse through the
-kernel's `uinput` module, and serves a touchpad page you open on your phone.
-Because it talks to the kernel instead of the display server, it works the same
-on X11 and Wayland, on any distro.
+A small daemon on the laptop creates a virtual mouse through the kernel's
+`uinput` module, so it works on X11 and Wayland, on any distro. The phone app
+finds the laptop on your Wi-Fi by itself and turns your screen into a touchpad.
 
-## Setup (once)
+## 1. Get the app
+
+Download the latest APK from **[Releases](../../releases/latest)** and open it
+on your Android phone (allow installing from your browser when asked).
+
+## 2. Set up the laptop (once)
 
 ```bash
-# 1. Load the uinput kernel module now, and on every boot
+# let your user create a virtual mouse
 sudo modprobe uinput
-sudo cp packaging/uinput.conf /etc/modules-load.d/uinput.conf
-
-# 2. Let the "input" group use /dev/uinput, so xcurs runs without sudo
+sudo cp packaging/uinput.conf /etc/modules-load.d/
 sudo cp packaging/99-xcurs-uinput.rules /etc/udev/rules.d/
 sudo udevadm control --reload-rules && sudo udevadm trigger
-sudo usermod -aG input "$USER"   # then log out and back in
+sudo usermod -aG input "$USER"      # then log out and back in
 
-# 3. Install
+# install
 python3 -m venv .venv && . .venv/bin/activate
-pip install -e '.[dev]'
+pip install -e .
 ```
 
-## Phase 1: ghost mouse
+Building `evdev` needs Python headers: `sudo dnf install python3-devel gcc`
+(Fedora) or `sudo apt install python3-dev gcc` (Ubuntu).
+
+## 3. Use it
 
 ```bash
-python -m xcurs.demo            # cursor draws a circle on its own
-python -m xcurs.demo --shape square --scroll
-pytest                          # unit tests, no /dev/uinput needed
+xcurs
 ```
 
-While the demo runs, `libinput list-devices` (or `cat /proc/bus/input/devices`)
-shows a new device called **xcurs virtual pointer**.
+Open the app on your phone within 2 minutes; it finds and pairs with the
+laptop on its own. After that, just open the app.
 
-## Phase 2: the thread
+No app? Scan the QR code `xcurs` prints, and use the touchpad in your browser.
+
+| Gesture                   | Does         |
+|---------------------------|--------------|
+| one finger                | move         |
+| tap                       | left click   |
+| two-finger tap            | right click  |
+| two-finger drag           | scroll       |
+| double-tap and hold, drag | drag         |
+
+Tap `···` for sensitivity, acceleration and scroll settings.
+
+## Troubleshooting
+
+- **Phone can't find the laptop:** allow it through the firewall:
+  `sudo ufw allow 8710/tcp && sudo ufw allow 5353/udp`
+  (Fedora: `sudo firewall-cmd --add-port=8710/tcp --add-service=mdns`).
+- **College or public Wi-Fi** often blocks devices from seeing each other.
+  Use your phone's hotspot instead.
+- **Pairing window closed:** restart `xcurs`, then open the app.
+
+## Options
 
 ```bash
-pip install -e '.[dev]'
-xcurs                 # prints a URL; open it on your phone (same Wi-Fi)
-xcurs --dry-run -v    # no /dev/uinput needed, logs events instead
+xcurs --pair-window 300   # allow app pairing for 5 minutes after start
+xcurs --trust-wifi        # always allow app pairing (trusted networks only)
+xcurs --new-token         # unpair every phone
+xcurs --dry-run -v        # no mouse, just log events
 ```
 
-| Gesture on the phone      | On the laptop |
-|---------------------------|---------------|
-| one finger drag           | move cursor   |
-| tap                       | left click    |
-| two-finger tap            | right click   |
-| three-finger tap          | middle click  |
-| two-finger drag           | scroll        |
-| double-tap and hold, drag | click-drag    |
-
-If the phone can't connect, allow the port through your firewall,
-e.g. `sudo ufw allow 8710/tcp`.
-
-## Phase 3: polish
-
-**Pairing.** On first run xcurs makes a secret token (`~/.config/xcurs/token`)
-and prints a QR code. Scan it once; the phone remembers the token. Without it
-the WebSocket is refused, so nobody else on the Wi-Fi can drive your mouse.
+**Run at login:**
 
 ```bash
-xcurs --pair        # show the QR again
-xcurs --new-token   # unpair every phone
-```
-
-**Settings.** Tap `···` on the phone for sensitivity, acceleration, scroll
-speed, natural scrolling and haptics. They're saved on the phone.
-Tip: use your browser's "Add to Home screen" to get a full-screen app.
-
-**Run at login** (systemd user service):
-
-```bash
-pipx install .                                   # puts xcurs in ~/.local/bin
-mkdir -p ~/.config/systemd/user
-cp packaging/xcurs.service ~/.config/systemd/user/
+pipx install .
+mkdir -p ~/.config/systemd/user && cp packaging/xcurs.service ~/.config/systemd/user/
 systemctl --user enable --now xcurs
-journalctl --user -u xcurs -f                    # logs
 ```
+
+## Development
+
+- Tests: `pytest`, and `cd android && ./gradlew test`
+- Build the app yourself: `cd android && ./gradlew assembleDebug`
+- Release: **Actions → Android release → Run workflow**, then type a version.
+  To sign releases with your own key, add the repository secrets
+  `XCURS_KEYSTORE_BASE64`, `XCURS_KEYSTORE_PASSWORD`, `XCURS_KEY_ALIAS` and
+  `XCURS_KEY_PASSWORD`.
 
 ## License
 
 Apache License 2.0. See [LICENSE](LICENSE).
-
-## V2.1: beacon + Android app
-
-The laptop now announces itself on the Wi-Fi over mDNS (`_xcurs._tcp`), and
-the Android app in `android/` finds it on its own: no typing addresses, and it
-survives the laptop's IP changing. The app shows the same touchpad page.
-
-**Build and install the app** (Android Studio, or the command line with the
-Android SDK installed):
-
-```bash
-cd android
-./gradlew assembleDebug
-adb install app/build/outputs/apk/debug/app-debug.apk
-```
-
-**First run:** start `xcurs` on the laptop, then open the app within 2
-minutes. It finds the laptop and pairs by itself; no QR needed (the QR still
-works as a fallback). After that it just connects.
-
-If the app can't find the laptop, allow mDNS through the firewall
-(`sudo ufw allow 5353/udp`, or `sudo firewall-cmd --add-service=mdns`). The app
-then falls back to the last address that worked. Use `xcurs --no-mdns` to
-stop announcing.
-
-## Releases: install the app without building
-
-Every tag like `v0.5.0` makes GitHub Actions build a signed APK and attach it
-to a [GitHub Release](../../releases). On the phone: download it, tap it, and
-allow installing from this source.
-
-**One-time setup (the signing key).** Android only installs an update over an
-existing app if both are signed with the same key, so create one and keep it safe:
-
-```bash
-keytool -genkeypair -v -keystore xcurs-release.jks -alias xcurs -keyalg RSA -keysize 4096 -validity 10000
-```
-
-Then add four repository secrets (Settings → Secrets and variables → Actions):
-
-| Secret                    | Value                                  |
-|---------------------------|----------------------------------------|
-| `XCURS_KEYSTORE_BASE64`   | output of `base64 -w0 xcurs-release.jks` |
-| `XCURS_KEYSTORE_PASSWORD` | the keystore password                  |
-| `XCURS_KEY_ALIAS`         | `xcurs`                                |
-| `XCURS_KEY_PASSWORD`      | the key password                       |
-
-**Release:** on GitHub, open **Actions → Android release → Run workflow** and
-type a version like `0.7.0`. Or push a tag:
-
-```bash
-git tag v0.7.0 && git push origin v0.7.0
-```
-
-Without the secrets the workflow still works, but signs with a throwaway key,
-so each release would need an uninstall first.
-
-## V2.4: pairing without a QR code
-
-For 2 minutes after `xcurs` starts (its *pairing window*, like Bluetooth
-pairing mode), the app can ask the laptop for the token over the Wi-Fi. You
-get a desktop notification whenever a phone pairs. After the window closes,
-only phones that already paired can connect, so strangers on the same Wi-Fi
-can't take over your mouse.
-
-```bash
-xcurs --pair-window 300   # keep it open for 5 minutes instead
-xcurs --pair-window 0     # QR only
-xcurs --trust-wifi        # always open: only on networks you trust
-```
-
-Running as a service? `systemctl --user restart xcurs` reopens the window.

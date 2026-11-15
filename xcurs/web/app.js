@@ -242,17 +242,48 @@
   });
 
   // ---- light -------------------------------------------------------------
-  // Everything is drawn on one canvas: a soft glow under each finger, a
-  // fading comet trail behind it, and rings that bloom out on a tap.
+  // Nothing here has an edge. Everything is drawn by stamping one soft,
+  // pre-rendered glow sprite, added together ("lighter") so blobs that meet
+  // melt into each other like drops of liquid light.
+  //   finger  a droplet on a spring: it lags, overshoots and stretches with speed
+  //   ink     particles shed along the path that drift, swell and dissolve
+  //   tap     a soft wave that spreads out like a ripple on water
   const fx = (() => {
     const ctx = pad.getContext("2d");
     let w = 0, h = 0, dpr = 1;
-    const fingers = new Map(); // id -> {x, y, gx, gy, life, trail: [{x, y, t}], drag}
-    const ripples = [];        // {x, y, t0, delay}
-    let scrollPulse = 0, scrollOffset = 0;
 
-    const TRAIL_MS = 380;
-    const easeOut = (t) => 1 - Math.pow(1 - t, 3);
+    function makeSprite(stop) {
+      const size = 256, c = document.createElement("canvas");
+      c.width = c.height = size;
+      const s = c.getContext("2d");
+      const g = s.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+      for (let i = 0; i <= 24; i++) {
+        const t = i / 24;
+        g.addColorStop(t, `rgba(255,255,255,${stop(t).toFixed(4)})`);
+      }
+      s.fillStyle = g;
+      s.fillRect(0, 0, size, size);
+      return c;
+    }
+    // A gaussian dot, and a gaussian ring (for ripples). Both reach exactly
+    // zero before the sprite's border, so no edge can ever show.
+    const DOT = makeSprite((t) => Math.exp(-t * t * 5) * (1 - t * t));
+    const RING = makeSprite((t) => Math.exp(-Math.pow((t - 0.72) / 0.11, 2)) * (1 - t * t));
+
+    function stamp(img, x, y, r, a, angle = 0, stretch = 1) {
+      if (a < 0.004 || r < 0.5) return;
+      ctx.globalAlpha = Math.min(a, 1);
+      if (stretch === 1) {
+        ctx.drawImage(img, x - r, y - r, r * 2, r * 2);
+        return;
+      }
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(angle);
+      ctx.scale(stretch, 1 / Math.sqrt(stretch)); // a drop thins as it stretches
+      ctx.drawImage(img, -r, -r, r * 2, r * 2);
+      ctx.restore();
+    }
 
     function resize() {
       dpr = Math.min(window.devicePixelRatio || 1, 3);
@@ -264,134 +295,143 @@
     window.addEventListener("resize", resize);
     resize();
 
+    const fingers = new Map(); // id -> droplet
+    const ink = [];            // shed particles
+    const waves = [];          // tap ripples
+    const MAX_INK = 520;
+    let scrollEnergy = 0, scrollOffset = 0;
+
+    const easeOut = (t) => 1 - Math.pow(1 - t, 3);
+    const rand = (a, b) => a + Math.random() * (b - a);
+
     function down(id, x, y) {
-      fingers.set(id, { x, y, gx: x, gy: y, life: 0, alive: true, trail: [{ x, y, t: performance.now() }], drag: false });
+      fingers.set(id, {
+        tx: x, ty: y, x, y, vx: 0, vy: 0,
+        ex: x, ey: y,          // where ink was last shed
+        life: 0, alive: true, drag: false, born: performance.now(),
+      });
+      // A soft bloom where the finger lands.
+      waves.push({ x, y, t0: performance.now(), delay: 0, size: 46, dur: 520, a: 0.22 });
     }
+
     function move(id, x, y) {
       const f = fingers.get(id);
       if (!f) return;
-      f.x = x; f.y = y;
-      f.trail.push({ x, y, t: performance.now() });
+      const dx = x - f.tx, dy = y - f.ty;
+      f.tx = x; f.ty = y;
+      // Shed ink every 4px along the path, drifting the way the finger went.
+      const dist = Math.hypot(x - f.ex, y - f.ey);
+      const steps = Math.floor(dist / 4);
+      for (let i = 1; i <= steps && ink.length < MAX_INK; i++) {
+        const k = i / steps;
+        ink.push({
+          x: f.ex + (x - f.ex) * k + rand(-2, 2),
+          y: f.ey + (y - f.ey) * k + rand(-2, 2),
+          vx: dx * 0.05 + rand(-0.25, 0.25),
+          vy: dy * 0.05 + rand(-0.25, 0.25),
+          r0: rand(7, 12), grow: rand(22, 40),
+          a: rand(0.07, 0.11) * (f.drag ? 1.5 : 1),
+          t0: performance.now(), dur: rand(650, 1050),
+        });
+      }
+      if (steps) { f.ex = x; f.ey = y; }
     }
+
     function up(id) {
       const f = fingers.get(id);
       if (f) f.alive = false;
     }
+
     function dragStart(id) {
       const f = fingers.get(id);
       if (f) f.drag = true;
     }
+
     function ripple(x, y, rings) {
       const t0 = performance.now();
-      for (let i = 0; i < rings; i++) ripples.push({ x, y, t0, delay: i * 90 });
+      for (let i = 0; i < rings; i++) {
+        waves.push({ x, y, t0, delay: i * 120, size: 120 + i * 18, dur: 950, a: 0.5 });
+      }
     }
+
     function scroll(dy) {
-      scrollPulse = 1;
+      scrollEnergy = Math.min(1, scrollEnergy + Math.abs(dy) / 30);
       scrollOffset += dy;
     }
 
-    function drawTrail(f, now) {
-      const pts = f.trail;
-      while (pts.length && now - pts[0].t > TRAIL_MS) pts.shift();
-      if (pts.length < 2) return;
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
-      // Smooth through midpoints with quadratic curves; older segments are
-      // thinner and dimmer, so the trail tapers like a comet's tail.
-      for (let i = 1; i < pts.length - 1; i++) {
-        const a = pts[i - 1], b = pts[i], c = pts[i + 1];
-        const k = 1 - (now - b.t) / TRAIL_MS;
-        ctx.strokeStyle = `rgba(255,255,255,${0.55 * k * k})`;
-        ctx.lineWidth = 1 + 9 * k * k;
-        ctx.beginPath();
-        ctx.moveTo((a.x + b.x) / 2, (a.y + b.y) / 2);
-        ctx.quadraticCurveTo(b.x, b.y, (b.x + c.x) / 2, (b.y + c.y) / 2);
-        ctx.stroke();
-      }
-    }
+    function drawFinger(f, now, step) {
+      // Spring toward the real touch point: soft lag, a hint of overshoot.
+      f.vx += (f.tx - f.x) * 0.3 * step;
+      f.vy += (f.ty - f.y) * 0.3 * step;
+      const damp = Math.pow(0.58, step);
+      f.vx *= damp; f.vy *= damp;
+      f.x += f.vx * step; f.y += f.vy * step;
 
-    function drawFinger(f) {
-      // Glow eases toward the finger, so it feels liquid rather than stuck on.
-      f.gx += (f.x - f.gx) * 0.45;
-      f.gy += (f.y - f.gy) * 0.45;
-      f.life += ((f.alive ? 1 : 0) - f.life) * (f.alive ? 0.22 : 0.12);
+      f.life += ((f.alive ? 1 : 0) - f.life) * (1 - Math.pow(f.alive ? 0.8 : 0.9, step));
       const a = f.life;
-      const r = 34 + 10 * a;
+      const speed = Math.hypot(f.vx, f.vy);
+      const angle = Math.atan2(f.vy, f.vx);
+      const stretch = 1 + Math.min(speed / 22, 0.9);
+      const breathe = 0.5 + 0.5 * Math.sin((now - f.born) / (f.drag ? 230 : 900));
 
-      const g = ctx.createRadialGradient(f.gx, f.gy, 0, f.gx, f.gy, r * 2.2);
-      g.addColorStop(0, `rgba(255,255,255,${0.30 * a})`);
-      g.addColorStop(0.35, `rgba(255,255,255,${0.10 * a})`);
-      g.addColorStop(1, "rgba(255,255,255,0)");
-      ctx.fillStyle = g;
-      ctx.beginPath();
-      ctx.arc(f.gx, f.gy, r * 2.2, 0, Math.PI * 2);
-      ctx.fill();
+      // Wide, faint halo; the droplet body; a hot, soft centre.
+      stamp(DOT, f.x, f.y, 150 + 12 * breathe, 0.10 * a);
+      stamp(DOT, f.x, f.y, (f.drag ? 64 : 50) + 4 * breathe, (f.drag ? 0.6 : 0.42) * a, angle, stretch);
+      stamp(DOT, f.x, f.y, f.drag ? 22 : 14, (f.drag ? 0.75 : 0.55) * a, angle, 1 + (stretch - 1) * 0.5);
+    }
 
-      ctx.strokeStyle = `rgba(255,255,255,${0.75 * a})`;
-      ctx.lineWidth = 1.25;
-      ctx.beginPath();
-      ctx.arc(f.gx, f.gy, r * (f.drag ? 0.8 : 0.62), 0, Math.PI * 2);
-      ctx.stroke();
-
-      if (f.drag) {
-        // Holding a drag: a solid core that slowly breathes.
-        const breathe = 0.5 + 0.5 * Math.sin(performance.now() / 260);
-        ctx.fillStyle = `rgba(255,255,255,${(0.75 + 0.2 * breathe) * a})`;
-        ctx.beginPath();
-        ctx.arc(f.gx, f.gy, 7 + 2 * breathe, 0, Math.PI * 2);
-        ctx.fill();
-      } else {
-        ctx.fillStyle = `rgba(255,255,255,${0.9 * a})`;
-        ctx.beginPath();
-        ctx.arc(f.gx, f.gy, 3, 0, Math.PI * 2);
-        ctx.fill();
+    function drawInk(now, step) {
+      for (let i = ink.length - 1; i >= 0; i--) {
+        const p = ink[i];
+        const t = (now - p.t0) / p.dur;
+        if (t >= 1) { ink.splice(i, 1); continue; }
+        const drag = Math.pow(0.95, step);
+        p.vx *= drag; p.vy *= drag;
+        p.x += p.vx * step; p.y += p.vy * step;
+        stamp(DOT, p.x, p.y, p.r0 + p.grow * easeOut(t), p.a * Math.pow(1 - t, 1.7));
       }
     }
 
-    function drawRipples(now) {
-      for (let i = ripples.length - 1; i >= 0; i--) {
-        const rp = ripples[i];
-        const t = (now - rp.t0 - rp.delay) / 620;
+    function drawWaves(now) {
+      for (let i = waves.length - 1; i >= 0; i--) {
+        const wv = waves[i];
+        const t = (now - wv.t0 - wv.delay) / wv.dur;
         if (t < 0) continue;
-        if (t >= 1) { ripples.splice(i, 1); continue; }
+        if (t >= 1) { waves.splice(i, 1); continue; }
         const e = easeOut(t);
-        ctx.strokeStyle = `rgba(255,255,255,${0.85 * (1 - e)})`;
-        ctx.lineWidth = 1.5 * (1 - e) + 0.5;
-        ctx.beginPath();
-        ctx.arc(rp.x, rp.y, 12 + 78 * e, 0, Math.PI * 2);
-        ctx.stroke();
+        stamp(RING, wv.x, wv.y, 18 + wv.size * e, wv.a * Math.pow(1 - t, 1.5));
+        if (wv.delay === 0) stamp(DOT, wv.x, wv.y, 30 + 20 * e, wv.a * 0.6 * Math.pow(1 - t, 3));
       }
     }
 
-    function drawScrollRail() {
-      // A slim rail on the right edge, with ticks that slide as you scroll.
-      if (scrollPulse < 0.01) return;
-      const x = w - 14, top = h * 0.25, len = h * 0.5, gap = 22;
-      ctx.strokeStyle = `rgba(255,255,255,${0.12 * scrollPulse})`;
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(x, top);
-      ctx.lineTo(x, top + len);
-      ctx.stroke();
+    function drawScrollGlow(step) {
+      // Soft beads of light down the right edge that slide as you scroll.
+      if (scrollEnergy < 0.01) return;
+      const x = w - 12, top = h * 0.22, len = h * 0.56, gap = 26;
       const off = ((scrollOffset % gap) + gap) % gap;
       for (let y = top + off; y < top + len; y += gap) {
-        const edge = Math.min(y - top, top + len - y) / 40; // fade at the ends
-        ctx.fillStyle = `rgba(255,255,255,${0.7 * scrollPulse * Math.min(1, edge)})`;
-        ctx.fillRect(x - 3, y, 6, 1.5);
+        const edge = Math.sin(((y - top) / len) * Math.PI); // fades to 0 at both ends
+        stamp(DOT, x, y, 9, 0.55 * scrollEnergy * edge, Math.PI / 2, 1.8);
       }
-      scrollPulse *= 0.94;
+      scrollEnergy *= Math.pow(0.95, step);
     }
 
-    function frame() {
-      const now = performance.now();
+    let last = performance.now();
+    function frame(now) {
+      // Physics is scaled by frame time, so 60 Hz and 120 Hz phones feel the same.
+      const step = Math.min((now - last) / 16.667, 3);
+      last = now;
+      ctx.globalCompositeOperation = "source-over";
+      ctx.globalAlpha = 1;
       ctx.clearRect(0, 0, w, h);
+      ctx.globalCompositeOperation = "lighter";
+      drawInk(now, step);
+      drawWaves(now);
       for (const [id, f] of fingers) {
-        drawTrail(f, now);
-        drawFinger(f);
-        if (!f.alive && f.life < 0.02 && f.trail.length < 2) fingers.delete(id);
+        drawFinger(f, now, step);
+        if (!f.alive && f.life < 0.01) fingers.delete(id);
       }
-      drawRipples(now);
-      drawScrollRail();
+      drawScrollGlow(step);
       flush();
       requestAnimationFrame(frame);
     }

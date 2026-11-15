@@ -34,13 +34,20 @@ app within 2 minutes.
 No app? Scan the QR code the installer prints, and use the touchpad in your
 browser.
 
-| Gesture                   | Does         |
-|---------------------------|--------------|
-| one finger                | move         |
-| tap                       | left click   |
-| two-finger tap            | right click  |
-| two-finger drag           | scroll       |
-| double-tap and hold, drag | drag         |
+| Gesture                      | Does                                   |
+|------------------------------|----------------------------------------|
+| one finger                   | move                                   |
+| tap                          | left click                             |
+| tap, then touch and hold     | drag                                   |
+| two-finger tap               | right click                            |
+| two-finger drag              | scroll                                 |
+| three-finger tap             | middle click                           |
+| three- or four-finger swipe  | your desktop's touchpad gestures       |
+
+Swipes with 3 or 4 fingers are played on a virtual touchpad, so the desktop
+handles them exactly like a laptop touchpad: on GNOME, 3 fingers switch
+workspaces or open the overview; on KDE Plasma, 4 fingers do. They need a
+Wayland session (X11 desktops mostly ignore touchpad gestures).
 
 Tap `···` for sensitivity, acceleration and scroll settings.
 
@@ -61,6 +68,7 @@ Tap `···` for sensitivity, acceleration and scroll settings.
 xcurs --pair-window 300   # allow app pairing for 5 minutes after start
 xcurs --trust-wifi        # always allow app pairing (trusted networks only)
 xcurs --new-token         # unpair every phone
+xcurs --no-gestures       # no virtual touchpad (3/4-finger swipes off)
 xcurs --dry-run -v        # no mouse, just log events
 ```
 

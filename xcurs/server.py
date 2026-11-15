@@ -8,6 +8,8 @@ The phone sends small JSON arrays, and each one becomes a mouse event:
     ["c", button]   click   (button: "left" | "right" | "middle")
     ["d", button]   press and hold (start a drag)
     ["u", button]   release
+    ["t", n, dx, dy] swipe n fingers (3 or 4) by dx, dy mm on the virtual
+                    touchpad, for desktop gestures; ["t", 0, 0, 0] lifts them
 """
 
 from __future__ import annotations
@@ -32,12 +34,14 @@ from .pairing import (
     token_ok,
 )
 from .pointer import BUTTONS, VirtualPointer
+from .touchpad import VirtualTouchpad
 
 log = logging.getLogger("xcurs")
 
 WEB_DIR = Path(__file__).parent / "web"
 MAX_STEP = 2000.0  # ignore absurd values instead of flinging the cursor away
 POINTER = web.AppKey("pointer", VirtualPointer)
+TOUCHPAD = web.AppKey("touchpad", object)  # VirtualTouchpad, or None if unavailable
 TOKEN = web.AppKey("token", str)  # empty string = pairing disabled
 WINDOW = web.AppKey("window", PairingWindow)
 MAX_NAME = 60
@@ -52,8 +56,8 @@ def _number(v) -> float | None:
     return max(-MAX_STEP, min(MAX_STEP, v))
 
 
-def handle_message(pointer: VirtualPointer, msg) -> bool:
-    """Apply one message to the pointer. Returns False if it was malformed."""
+def handle_message(pointer: VirtualPointer, msg, touchpad: VirtualTouchpad | None = None) -> bool:
+    """Apply one message. Returns False if it was malformed."""
     if not isinstance(msg, list) or not msg:
         return False
     kind, args = msg[0], msg[1:]
@@ -69,6 +73,14 @@ def handle_message(pointer: VirtualPointer, msg) -> bool:
         {"c": pointer.click, "d": pointer.press, "u": pointer.release}[kind](args[0])
         return True
 
+    if kind == "t" and len(args) == 3 and args[0] in (0, 3, 4) and not isinstance(args[0], bool):
+        dx, dy = _number(args[1]), _number(args[2])
+        if dx is None or dy is None:
+            return False
+        if touchpad is not None:
+            touchpad.swipe(int(args[0]), dx, dy)
+        return True
+
     return False
 
 
@@ -77,6 +89,7 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
         log.warning("rejected unpaired phone: %s", request.remote)
         raise web.HTTPUnauthorized()
     pointer = request.app[POINTER]
+    touchpad = request.app[TOUCHPAD]
     ws = web.WebSocketResponse(heartbeat=10)
     await ws.prepare(request)
     log.info("phone connected: %s", request.remote)
@@ -91,10 +104,12 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
             # A frame may carry one message or a batch of them.
             batch = msg if isinstance(msg, list) and msg and isinstance(msg[0], list) else [msg]
             for m in batch:
-                handle_message(pointer, m)
+                handle_message(pointer, m, touchpad)
     finally:
-        # The phone vanished mid-drag? Don't leave the button held down.
+        # The phone vanished mid-drag? Don't leave a button or fingers down.
         pointer.release_all()
+        if touchpad is not None:
+            touchpad.lift()
         log.info("phone disconnected: %s", request.remote)
     return ws
 
@@ -131,10 +146,14 @@ async def index(request: web.Request) -> web.FileResponse:
 
 
 def make_app(
-    pointer: VirtualPointer, token: str = "", window: PairingWindow | None = None
+    pointer: VirtualPointer,
+    token: str = "",
+    window: PairingWindow | None = None,
+    touchpad: VirtualTouchpad | None = None,
 ) -> web.Application:
     app = web.Application()
     app[POINTER] = pointer
+    app[TOUCHPAD] = touchpad
     app[TOKEN] = token
     app[WINDOW] = window or PairingWindow(0)
     app.router.add_get("/", index)
@@ -145,6 +164,8 @@ def make_app(
 
     async def close_pointer(app: web.Application) -> None:
         app[POINTER].close()
+        if app[TOUCHPAD] is not None:
+            app[TOUCHPAD].close()
 
     app.on_cleanup.append(close_pointer)
     return app
@@ -189,6 +210,10 @@ def main(argv=None) -> None:
     p.add_argument("--no-auth", action="store_true", help="skip pairing (trusted networks only)")
     p.add_argument("--no-mdns", action="store_true", help="don't announce on the network")
     p.add_argument(
+        "--no-gestures", action="store_true",
+        help="don't create the virtual touchpad used for 3- and 4-finger gestures",
+    )
+    p.add_argument(
         "--pair-window", type=int, default=120, metavar="SECONDS",
         help="let the phone app pair without a QR for this long after start (0 = off)",
     )
@@ -218,6 +243,12 @@ def main(argv=None) -> None:
             f"Can't open /dev/uinput ({err}).\n"
             "See the README setup: modprobe uinput, the udev rule and the input group."
         )
+    touchpad = None
+    if not args.no_gestures:
+        try:
+            touchpad = VirtualTouchpad(device=_LoggingDevice() if args.dry_run else None)
+        except Exception as err:  # gestures are a bonus; the mouse still works
+            log.warning("3/4-finger gestures unavailable: %s", err)
 
     print_pairing(url)
     window = PairingWindow(args.pair_window, always=args.trust_wifi)
@@ -225,7 +256,7 @@ def main(argv=None) -> None:
         print("  Any phone on this Wi-Fi can pair (--trust-wifi).\n")
     elif token and window.is_open():
         print(f"  Or just open the xcurs app: pairing is open for {window.seconds_left()} s.\n")
-    app = make_app(pointer, token, window)
+    app = make_app(pointer, token, window, touchpad)
     if not args.no_mdns:
         Beacon(lan_ip(), args.port, token).attach(app)
     web.run_app(app, host=args.host, port=args.port, print=None)

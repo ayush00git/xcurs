@@ -2,31 +2,39 @@
 
 Your phone, as a touchpad for your Linux laptop.
 
-A small daemon on the laptop creates a virtual mouse through the kernel's
-`uinput` module, so it works on X11 and Wayland, on any distro. The phone app
-finds the laptop on your Wi-Fi by itself and turns your screen into a touchpad.
+<p align="center">
+  <img src="docs/screenshots/1-touchpad.png" width="200" alt="The touchpad: dark glass">
+  <img src="docs/screenshots/2-gesture.png" width="200" alt="A finger's trail of light">
+  <img src="docs/screenshots/3-keyboard.png" width="200" alt="The glass keyboard">
+  <img src="docs/screenshots/4-settings.png" width="200" alt="Settings">
+</p>
 
-## 1. Get the app
+A small daemon on the laptop creates a virtual mouse, touchpad and keyboard
+through the kernel's `uinput` module, so it works on X11 and Wayland, on any
+distro. The phone app finds the laptop on your Wi-Fi by itself and turns your
+screen into a touchpad.
 
-Download the latest APK from **[Releases](../../releases/latest)** and open it
-on your Android phone (allow installing from your browser when asked).
+## Quick install
 
-## 2. Set up the laptop (once)
+**Step 1 · Phone:** download the latest APK from
+**[Releases](../../releases/latest)** and install it.
+
+**Step 2 · Laptop:**
 
 ```bash
 git clone https://github.com/ayush00git/xcurs && cd xcurs
 ./install.sh
 ```
 
-That's it. The installer sets up the virtual mouse (`uinput` and the `input`
-group), installs xcurs, opens the firewall if needed, and runs xcurs in the
-background at every login. It asks for `sudo` only where it must; see each step
-first with `./install.sh --dry-run`.
+Then open the app within 2 minutes, on the same Wi-Fi. It pairs on its own.
 
-## 3. Connect
+The installer sets up `uinput` and the `input` group, installs xcurs, opens the
+firewall if needed, and runs xcurs in the background at every login. It asks
+for `sudo` only where it must; preview every step with `./install.sh --dry-run`.
 
-Open the app on your phone, on the same Wi-Fi, within 2 minutes of installing.
-It finds the laptop and pairs on its own. After that, just open the app.
+## Using it
+
+After the first pairing, just open the app.
 
 To pair another phone later, run `systemctl --user restart xcurs` and open the
 app within 2 minutes.

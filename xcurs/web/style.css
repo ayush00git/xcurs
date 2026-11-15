@@ -492,3 +492,7 @@ body.touching #kbd { opacity: 0.15; }
   line-height: 1;
   touch-action: manipulation;
 }
+
+/* panels sit above the floating keyboard button */
+#kbd { z-index: 5; }
+#sheet, #keys { z-index: 10; }

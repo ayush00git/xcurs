@@ -22,7 +22,15 @@ from pathlib import Path
 from aiohttp import WSMsgType, web
 
 from .beacon import Beacon
-from .pairing import load_token, pair_url, print_pairing, token_ok
+from .pairing import (
+    PairingWindow,
+    is_local,
+    load_token,
+    notify,
+    pair_url,
+    print_pairing,
+    token_ok,
+)
 from .pointer import BUTTONS, VirtualPointer
 
 log = logging.getLogger("xcurs")
@@ -31,6 +39,8 @@ WEB_DIR = Path(__file__).parent / "web"
 MAX_STEP = 2000.0  # ignore absurd values instead of flinging the cursor away
 POINTER = web.AppKey("pointer", VirtualPointer)
 TOKEN = web.AppKey("token", str)  # empty string = pairing disabled
+WINDOW = web.AppKey("window", PairingWindow)
+MAX_NAME = 60
 
 
 def _number(v) -> float | None:
@@ -99,17 +109,38 @@ async def check(request: web.Request) -> web.Response:
     return web.Response(status=204 if _authorized(request) else 401)
 
 
+async def pair(request: web.Request) -> web.Response:
+    """The app asks for the token here, instead of scanning the QR code."""
+    window = request.app[WINDOW]
+    if not is_local(request.remote):
+        raise web.HTTPForbidden(text="pairing is only for the local network")
+    if not window.is_open():
+        return web.json_response({"error": "pairing closed"}, status=403)
+    try:
+        body = await request.json()
+    except ValueError:
+        body = {}
+    name = str(body.get("name") or "a phone")[:MAX_NAME] if isinstance(body, dict) else "a phone"
+    log.info("paired with %s (%s)", name, request.remote)
+    notify("xcurs: phone paired", f"{name} can now control your mouse.")
+    return web.json_response({"token": request.app[TOKEN]})
+
+
 async def index(request: web.Request) -> web.FileResponse:
     return web.FileResponse(WEB_DIR / "index.html", headers={"Cache-Control": "no-cache"})
 
 
-def make_app(pointer: VirtualPointer, token: str = "") -> web.Application:
+def make_app(
+    pointer: VirtualPointer, token: str = "", window: PairingWindow | None = None
+) -> web.Application:
     app = web.Application()
     app[POINTER] = pointer
     app[TOKEN] = token
+    app[WINDOW] = window or PairingWindow(0)
     app.router.add_get("/", index)
     app.router.add_get("/ws", ws_handler)
     app.router.add_get("/check", check)
+    app.router.add_post("/pair", pair)
     app.router.add_static("/static/", WEB_DIR)
 
     async def close_pointer(app: web.Application) -> None:
@@ -157,6 +188,14 @@ def main(argv=None) -> None:
     p.add_argument("--new-token", action="store_true", help="forget paired phones, make a new token")
     p.add_argument("--no-auth", action="store_true", help="skip pairing (trusted networks only)")
     p.add_argument("--no-mdns", action="store_true", help="don't announce on the network")
+    p.add_argument(
+        "--pair-window", type=int, default=120, metavar="SECONDS",
+        help="let the phone app pair without a QR for this long after start (0 = off)",
+    )
+    p.add_argument(
+        "--trust-wifi", action="store_true",
+        help="always let phones on this network pair (only on networks you trust)",
+    )
     p.add_argument("-v", "--verbose", action="store_true")
     args = p.parse_args(argv)
 
@@ -181,7 +220,12 @@ def main(argv=None) -> None:
         )
 
     print_pairing(url)
-    app = make_app(pointer, token)
+    window = PairingWindow(args.pair_window, always=args.trust_wifi)
+    if args.trust_wifi:
+        print("  Any phone on this Wi-Fi can pair (--trust-wifi).\n")
+    elif token and window.is_open():
+        print(f"  Or just open the xcurs app: pairing is open for {window.seconds_left()} s.\n")
+    app = make_app(pointer, token, window)
     if not args.no_mdns:
         Beacon(lan_ip(), args.port, token).attach(app)
     web.run_app(app, host=args.host, port=args.port, print=None)

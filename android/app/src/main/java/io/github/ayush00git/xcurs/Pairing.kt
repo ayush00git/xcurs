@@ -39,7 +39,7 @@ object PairingCodec {
      * laptop on the network is ours, without the token ever being broadcast.
      */
     fun pairingId(token: String): String =
-        MessageDigest.getInstance("SHA-256")
+        if (token.isEmpty()) "" else MessageDigest.getInstance("SHA-256")
             .digest(token.toByteArray())
             .joinToString("") { "%02x".format(it) }
             .take(16)

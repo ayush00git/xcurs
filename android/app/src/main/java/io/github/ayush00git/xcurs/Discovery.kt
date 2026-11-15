@@ -6,15 +6,16 @@ import android.net.nsd.NsdServiceInfo
 import android.os.Handler
 import android.os.Looper
 
+/** One xcurs laptop seen on the network, and the fingerprint it announced. */
+data class Found(val laptop: Laptop, val pid: String)
+
 /**
- * Finds our laptop on the Wi-Fi with mDNS / DNS-SD (Android calls it NSD).
+ * Finds xcurs laptops on the Wi-Fi with mDNS / DNS-SD (Android calls it NSD).
  *
  * 1. Browse for services of type `_xcurs._tcp`.
- * 2. Resolve each one to get its address, port and TXT records.
- * 3. Keep the one whose `pid` TXT record matches our token's fingerprint.
+ * 2. Resolve each one to get its address, port and TXT records (`pid`).
  *
- * [onResult] is called exactly once, on the main thread: with the laptop, or
- * with null if nothing matched before [timeoutMs].
+ * Callbacks run on the main thread, exactly once per search.
  */
 class Discovery(context: Context) {
     private val nsd = context.getSystemService(Context.NSD_SERVICE) as NsdManager
@@ -27,17 +28,29 @@ class Discovery(context: Context) {
     private val pending = ArrayDeque<NsdServiceInfo>()
     private var resolving = false
 
+    /** Our paired laptop: the one whose `pid` matches the token, or null. */
     fun find(token: String, timeoutMs: Long = 4000, onResult: (Laptop?) -> Unit) {
+        val wanted = PairingCodec.pairingId(token)
+        browse(timeoutMs, stopWhen = { it.pid == wanted }) { all ->
+            onResult(all.firstOrNull { it.pid == wanted }?.laptop)
+        }
+    }
+
+    /** Every xcurs laptop that answers within [timeoutMs] (for first-time pairing). */
+    fun all(timeoutMs: Long = 2500, onResult: (List<Found>) -> Unit) =
+        browse(timeoutMs, stopWhen = { false }, onDone = onResult)
+
+    private fun browse(timeoutMs: Long, stopWhen: (Found) -> Boolean, onDone: (List<Found>) -> Unit) {
         stop()
         done = false
-        val wanted = PairingCodec.pairingId(token)
+        val found = mutableListOf<Found>()
 
-        fun finish(laptop: Laptop?) {
+        fun finish() {
             main.post {
                 if (done) return@post
                 done = true
                 stop()
-                onResult(laptop)
+                onDone(found.distinctBy { it.laptop })
             }
         }
 
@@ -48,23 +61,26 @@ class Discovery(context: Context) {
             resolving = true
             nsd.resolveService(info, object : NsdManager.ResolveListener {
                 override fun onResolveFailed(info: NsdServiceInfo, error: Int) {
-                    resolving = false
-                    main.post { resolveNext() }
+                    main.post {
+                        resolving = false
+                        resolveNext()
+                    }
                 }
 
                 override fun onServiceResolved(info: NsdServiceInfo) {
-                    resolving = false
-                    val pid = info.attributes["pid"]?.let { String(it) }
-                    val host = info.host
-                    if (pid == wanted && host != null) {
-                        // Strip any "%wlan0" scope suffix from IPv6 addresses.
-                        val address = host.hostAddress?.substringBefore('%')
+                    // Strip any "%wlan0" scope suffix from IPv6 addresses.
+                    val address = info.host?.hostAddress?.substringBefore('%')
+                    val pid = info.attributes["pid"]?.let { String(it) }.orEmpty()
+                    main.post {
+                        resolving = false
+                        if (done) return@post
                         if (address != null) {
-                            finish(Laptop(address, info.port))
-                            return
+                            val f = Found(Laptop(address, info.port), pid)
+                            found += f
+                            if (stopWhen(f)) return@post finish()
                         }
+                        resolveNext()
                     }
-                    main.post { resolveNext() }
                 }
             })
         }
@@ -77,7 +93,7 @@ class Discovery(context: Context) {
             override fun onDiscoveryStarted(serviceType: String) {}
             override fun onDiscoveryStopped(serviceType: String) {}
             override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) {
-                finish(null)
+                finish()
             }
             override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) {}
             override fun onServiceLost(info: NsdServiceInfo) {}
@@ -90,7 +106,7 @@ class Discovery(context: Context) {
         }
         listener = l
         nsd.discoverServices(SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, l)
-        main.postDelayed({ finish(null) }, timeoutMs)
+        main.postDelayed({ finish() }, timeoutMs)
     }
 
     fun stop() {
@@ -103,6 +119,7 @@ class Discovery(context: Context) {
         }
         listener = null
         pending.clear()
+        resolving = false
         main.removeCallbacksAndMessages(null)
     }
 
@@ -110,4 +127,3 @@ class Discovery(context: Context) {
         const val SERVICE_TYPE = "_xcurs._tcp"
     }
 }
-

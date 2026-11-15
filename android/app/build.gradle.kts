@@ -15,8 +15,8 @@ android {
         applicationId = "io.github.ayush00git.xcurs"
         minSdk = 26
         targetSdk = 35
-        versionCode = System.getenv("XCURS_VERSION_CODE")?.toIntOrNull() ?: 2
-        versionName = System.getenv("XCURS_VERSION") ?: "0.5.0"
+        versionCode = System.getenv("XCURS_VERSION_CODE")?.toIntOrNull() ?: 3
+        versionName = System.getenv("XCURS_VERSION") ?: "0.6.0"
     }
 
     signingConfigs {

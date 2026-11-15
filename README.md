@@ -48,7 +48,8 @@ Tap `···` for sensitivity, acceleration and scroll settings.
 
 - **Phone can't find the laptop:** allow it through the firewall:
   `sudo ufw allow 8710/tcp && sudo ufw allow 5353/udp`
-  (Fedora: `sudo firewall-cmd --add-port=8710/tcp --add-service=mdns`).
+  (Fedora: `sudo firewall-cmd --permanent --add-port=8710/tcp`, then
+  `sudo firewall-cmd --permanent --add-service=mdns && sudo firewall-cmd --reload`).
 - **College or public Wi-Fi** often blocks devices from seeing each other.
   Use your phone's hotspot instead.
 - **Pairing window closed:** `systemctl --user restart xcurs`, then open the app.

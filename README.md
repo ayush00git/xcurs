@@ -83,3 +83,26 @@ journalctl --user -u xcurs -f                    # logs
 ## License
 
 Apache License 2.0. See [LICENSE](LICENSE).
+
+## V2.1: beacon + Android app
+
+The laptop now announces itself on the Wi-Fi over mDNS (`_xcurs._tcp`), and
+the Android app in `android/` finds it on its own: no typing addresses, and it
+survives the laptop's IP changing. The app shows the same touchpad page.
+
+**Build and install the app** (Android Studio, or the command line with the
+Android SDK installed):
+
+```bash
+cd android
+./gradlew assembleDebug
+adb install app/build/outputs/apk/debug/app-debug.apk
+```
+
+**First run:** start `xcurs` on the laptop, open the app, tap **scan qr**.
+After that the app just finds the laptop by itself.
+
+If the app can't find the laptop, allow mDNS through the firewall
+(`sudo ufw allow 5353/udp`, or `sudo firewall-cmd --add-service=mdns`). The app
+then falls back to the last address that worked. Use `xcurs --no-mdns` to
+stop announcing.

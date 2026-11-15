@@ -26,10 +26,24 @@ class Store(context: Context) {
             }
         }
 
+    var knockEnabled: Boolean
+        get() = prefs.getBoolean("knock", false)
+        set(value) = prefs.edit { putBoolean("knock", value) }
+
+    /** Whether we've already offered the knock feature once. */
+    var knockOffered: Boolean
+        get() = prefs.getBoolean("knock_offered", false)
+        set(value) = prefs.edit { putBoolean("knock_offered", value) }
+
     fun save(pairing: Pairing) {
         token = pairing.token
         lastLaptop = pairing.laptop
     }
 
-    fun forget() = prefs.edit { clear() }
+    /** Forget the laptop, but keep app preferences like the knock listener. */
+    fun forget() = prefs.edit {
+        remove("token")
+        remove("host")
+        remove("port")
+    }
 }

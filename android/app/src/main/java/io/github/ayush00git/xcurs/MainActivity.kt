@@ -1,5 +1,6 @@
 package io.github.ayush00git.xcurs
 
+import android.Manifest
 import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
 import android.app.AlertDialog
@@ -8,8 +9,11 @@ import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
+import android.provider.Settings
 import android.text.InputType
 import android.view.Gravity
 import android.view.View
@@ -26,6 +30,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -56,6 +61,13 @@ class MainActivity : ComponentActivity() {
     private lateinit var secondary: TextView
     private var breathing: ObjectAnimator? = null
 
+    private var waitingForOverlayGrant = false
+
+    // Android 13+ asks before an app may post notifications; the knock
+    // listener's notification is how you see (and stop) it.
+    private val askNotifications =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { setupKnockOverlay() }
+
     private var pageReady = false
     private var loadFailed = false
     private var pausedAt = 0L
@@ -68,18 +80,25 @@ class MainActivity : ComponentActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
         setContentView(buildUi())
         connect()
+        handleAction(intent)
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         if (!pageReady) connect()
+        handleAction(intent)
     }
 
     override fun onResume() {
         super.onResume()
         hideSystemBars()
         web.onResume()
+        if (waitingForOverlayGrant) {
+            // Back from the "Display over other apps" screen, granted or not.
+            waitingForOverlayGrant = false
+            KnockService.start(this)
+        }
         // Away for a while? The laptop may have a new IP by now: look again.
         if (pageReady && pausedAt > 0 && SystemClock.elapsedRealtime() - pausedAt > STALE_AFTER_MS) {
             connect()
@@ -118,6 +137,7 @@ class MainActivity : ComponentActivity() {
 
     private fun onPageReady() {
         pageReady = true
+        offerKnockOnce()
         stopBreathing()
         overlay.animate().alpha(0f).setDuration(FADE_MS).withEndAction {
             overlay.visibility = View.GONE
@@ -157,6 +177,63 @@ class MainActivity : ComponentActivity() {
             .setView(input)
             .setPositiveButton("Pair") { _, _ -> pair(input.text.toString()) }
             .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    // ---- knock setup ------------------------------------------------------
+
+    private fun handleAction(intent: Intent?) {
+        if (intent?.action == ACTION_SETUP_KNOCK) {
+            intent.action = null // don't run again on rotation / resume
+            setupKnock()
+        }
+    }
+
+    private fun offerKnockOnce() {
+        if (store.knockOffered || store.knockEnabled) return
+        store.knockOffered = true
+        AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle("Knock to open")
+            .setMessage(
+                "Knock three times on the back of your phone to open xcurs from anywhere.\n\n" +
+                    "It keeps a small notification while listening, and only listens " +
+                    "while the screen is on. You can toggle it later from the " +
+                    "\"xcurs knock\" quick-settings tile.",
+            )
+            .setPositiveButton("Turn on") { _, _ -> setupKnock() }
+            .setNegativeButton("Not now", null)
+            .show()
+    }
+
+    /** Step 1: notifications permission (Android 13+). Step 2: overlay. Step 3: start. */
+    private fun setupKnock() {
+        if (Build.VERSION.SDK_INT >= 33) {
+            askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            setupKnockOverlay()
+        }
+    }
+
+    private fun setupKnockOverlay() {
+        if (Settings.canDrawOverlays(this)) {
+            KnockService.start(this)
+            toast("Knock three times to open xcurs")
+            return
+        }
+        AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle("One more permission")
+            .setMessage(
+                "To open by itself when you knock, Android needs xcurs to be allowed to " +
+                    "\"Display over other apps\". Without it, a knock shows a notification " +
+                    "you tap instead.",
+            )
+            .setPositiveButton("Open settings") { _, _ ->
+                waitingForOverlayGrant = true
+                startActivity(
+                    Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")),
+                )
+            }
+            .setNegativeButton("Skip") { _, _ -> KnockService.start(this) }
             .show()
     }
 
@@ -314,8 +391,9 @@ class MainActivity : ComponentActivity() {
     private val Int.dp: Int get() = (this * resources.displayMetrics.density).toInt()
     private val Float.dp: Float get() = this * resources.displayMetrics.density
 
-    private companion object {
-        const val FADE_MS = 450L
-        const val STALE_AFTER_MS = 60_000L
+    companion object {
+        const val ACTION_SETUP_KNOCK = "io.github.ayush00git.xcurs.SETUP_KNOCK"
+        private const val FADE_MS = 450L
+        private const val STALE_AFTER_MS = 60_000L
     }
 }

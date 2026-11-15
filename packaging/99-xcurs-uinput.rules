@@ -1,0 +1,2 @@
+# Let members of the "input" group open /dev/uinput, so xcurs runs without sudo.
+KERNEL=="uinput", SUBSYSTEM=="misc", MODE="0660", GROUP="input", OPTIONS+="static_node=uinput"

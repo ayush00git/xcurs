@@ -26,7 +26,9 @@ git clone https://github.com/ayush00git/xcurs && cd xcurs
 ./install.sh
 ```
 
-Then open the app within 2 minutes, on the same Wi-Fi. It pairs on its own.
+Then open the app on the same Wi-Fi: it finds the laptop in 2–3 seconds and
+pairs on its own. (The first pairing has to happen within 2 minutes of
+installing: that's how long the laptop accepts new phones after xcurs starts.)
 
 The installer sets up `uinput` and the `input` group, installs xcurs, opens the
 firewall if needed, and runs xcurs in the background at every login. It asks
@@ -34,7 +36,7 @@ for `sudo` only where it must; preview every step with `./install.sh --dry-run`.
 
 ## Using it
 
-After the first pairing, just open the app.
+After the first pairing, just open the app: it connects in 2–3 seconds.
 
 To pair another phone later, run `systemctl --user restart xcurs` and open the
 app within 2 minutes.

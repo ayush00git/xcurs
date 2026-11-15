@@ -1,7 +1,5 @@
 [Unit]
 Description=xcurs - phone touchpad daemon
-After=network-online.target
-Wants=network-online.target
 
 [Service]
 ExecStart=%h/.local/bin/xcurs

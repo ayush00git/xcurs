@@ -1,2 +1,4 @@
-# Let members of the "input" group open /dev/uinput, so xcurs runs without sudo.
-KERNEL=="uinput", SUBSYSTEM=="misc", MODE="0660", GROUP="input", OPTIONS+="static_node=uinput"
+# Let xcurs create its virtual mouse without sudo:
+#   uaccess  - the user logged in at this computer gets access right away
+#   input    - members of the "input" group too (e.g. over SSH)
+KERNEL=="uinput", SUBSYSTEM=="misc", MODE="0660", GROUP="input", OPTIONS+="static_node=uinput", TAG+="uaccess"

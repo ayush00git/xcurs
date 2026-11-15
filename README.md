@@ -14,31 +14,25 @@ on your Android phone (allow installing from your browser when asked).
 ## 2. Set up the laptop (once)
 
 ```bash
-# let your user create a virtual mouse
-sudo modprobe uinput
-sudo cp packaging/uinput.conf /etc/modules-load.d/
-sudo cp packaging/99-xcurs-uinput.rules /etc/udev/rules.d/
-sudo udevadm control --reload-rules && sudo udevadm trigger
-sudo usermod -aG input "$USER"      # then log out and back in
-
-# install
-python3 -m venv .venv && . .venv/bin/activate
-pip install -e .
+git clone https://github.com/ayush00git/xcurs && cd xcurs
+./install.sh
 ```
 
-Building `evdev` needs Python headers: `sudo dnf install python3-devel gcc`
-(Fedora) or `sudo apt install python3-dev gcc` (Ubuntu).
+That's it. The installer sets up the virtual mouse (`uinput` and the `input`
+group), installs xcurs, opens the firewall if needed, and runs xcurs in the
+background at every login. It asks for `sudo` only where it must; see each step
+first with `./install.sh --dry-run`.
 
-## 3. Use it
+## 3. Connect
 
-```bash
-xcurs
-```
+Open the app on your phone, on the same Wi-Fi, within 2 minutes of installing.
+It finds the laptop and pairs on its own. After that, just open the app.
 
-Open the app on your phone within 2 minutes; it finds and pairs with the
-laptop on its own. After that, just open the app.
+To pair another phone later, run `systemctl --user restart xcurs` and open the
+app within 2 minutes.
 
-No app? Scan the QR code `xcurs` prints, and use the touchpad in your browser.
+No app? Scan the QR code the installer prints, and use the touchpad in your
+browser.
 
 | Gesture                   | Does         |
 |---------------------------|--------------|
@@ -57,7 +51,8 @@ Tap `···` for sensitivity, acceleration and scroll settings.
   (Fedora: `sudo firewall-cmd --add-port=8710/tcp --add-service=mdns`).
 - **College or public Wi-Fi** often blocks devices from seeing each other.
   Use your phone's hotspot instead.
-- **Pairing window closed:** restart `xcurs`, then open the app.
+- **Pairing window closed:** `systemctl --user restart xcurs`, then open the app.
+- **Is it running?** `systemctl --user status xcurs`, logs: `journalctl --user -u xcurs -f`
 
 ## Options
 
@@ -68,16 +63,20 @@ xcurs --new-token         # unpair every phone
 xcurs --dry-run -v        # no mouse, just log events
 ```
 
-**Run at login:**
+To change how the background service runs, `systemctl --user edit xcurs` and add
+(this survives updates):
 
-```bash
-pipx install .
-mkdir -p ~/.config/systemd/user && cp packaging/xcurs.service ~/.config/systemd/user/
-systemctl --user enable --now xcurs
+```ini
+[Service]
+ExecStart=
+ExecStart=%h/.local/bin/xcurs --pair-window 300
 ```
+
+**Update:** `git pull && ./install.sh`. **Remove:** `./install.sh --uninstall`.
 
 ## Development
 
+- Dev setup: `python3 -m venv .venv && . .venv/bin/activate && pip install -e ".[dev]"`
 - Tests: `pytest`, and `cd android && ./gradlew test`
 - Build the app yourself: `cd android && ./gradlew assembleDebug`
 - Release: **Actions → Android release → Run workflow**, then type a version.

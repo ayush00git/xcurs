@@ -32,11 +32,13 @@ class Discovery(context: Context) {
         done = false
         val wanted = PairingCodec.pairingId(token)
 
-        fun finish(laptop: Laptop?) = main.post {
-            if (done) return@post
-            done = true
-            stop()
-            onResult(laptop)
+        fun finish(laptop: Laptop?) {
+            main.post {
+                if (done) return@post
+                done = true
+                stop()
+                onResult(laptop)
+            }
         }
 
         lateinit var resolveNext: () -> Unit
@@ -74,7 +76,9 @@ class Discovery(context: Context) {
         val l = object : NsdManager.DiscoveryListener {
             override fun onDiscoveryStarted(serviceType: String) {}
             override fun onDiscoveryStopped(serviceType: String) {}
-            override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) = finish(null)
+            override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) {
+                finish(null)
+            }
             override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) {}
             override fun onServiceLost(info: NsdServiceInfo) {}
             override fun onServiceFound(info: NsdServiceInfo) {

@@ -21,6 +21,7 @@ from pathlib import Path
 
 from aiohttp import WSMsgType, web
 
+from .beacon import Beacon
 from .pairing import load_token, pair_url, print_pairing, token_ok
 from .pointer import BUTTONS, VirtualPointer
 
@@ -155,6 +156,7 @@ def main(argv=None) -> None:
     p.add_argument("--pair", action="store_true", help="show the pairing QR code and exit")
     p.add_argument("--new-token", action="store_true", help="forget paired phones, make a new token")
     p.add_argument("--no-auth", action="store_true", help="skip pairing (trusted networks only)")
+    p.add_argument("--no-mdns", action="store_true", help="don't announce on the network")
     p.add_argument("-v", "--verbose", action="store_true")
     args = p.parse_args(argv)
 
@@ -179,7 +181,10 @@ def main(argv=None) -> None:
         )
 
     print_pairing(url)
-    web.run_app(make_app(pointer, token), host=args.host, port=args.port, print=None)
+    app = make_app(pointer, token)
+    if not args.no_mdns:
+        Beacon(lan_ip(), args.port, token).attach(app)
+    web.run_app(app, host=args.host, port=args.port, print=None)
 
 
 if __name__ == "__main__":

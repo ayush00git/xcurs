@@ -80,12 +80,12 @@
   let moveX = 0, moveY = 0, scrollX = 0, scrollY = 0;
   let swipeFingers = 0, swipeX = 0, swipeY = 0;   // a 3/4-finger desktop gesture
 
-  function flush(extra) {
+  function flush(...extras) {
     const batch = [];
     if (moveX || moveY) batch.push(["m", round2(moveX), round2(moveY)]);
     if (scrollX || scrollY) batch.push(["s", round2(scrollX), round2(scrollY)]);
     if (swipeFingers && (swipeX || swipeY)) batch.push(["t", swipeFingers, round2(swipeX), round2(swipeY)]);
-    if (extra) batch.push(extra);
+    for (const m of extras) if (m) batch.push(m);
     moveX = moveY = scrollX = scrollY = swipeX = swipeY = 0;
     if (batch.length && ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(batch));
@@ -130,6 +130,22 @@
     flush(["c", "left"]);
   }
 
+  // The glass sheen drifts a little against your fingers, like a reflection
+  // shifting as you move in front of a mirror.
+  const glass = document.getElementById("glass");
+  function sheen() {
+    if (!touches.size) {
+      glass.style.setProperty("--sheen-x", "0px");
+      glass.style.setProperty("--sheen-y", "0px");
+      return;
+    }
+    let cx = 0, cy = 0;
+    for (const t of touches.values()) { cx += t.x; cy += t.y; }
+    cx /= touches.size; cy /= touches.size;
+    glass.style.setProperty("--sheen-x", `${((cx / innerWidth) - 0.5) * -28}px`);
+    glass.style.setProperty("--sheen-y", `${((cy / innerHeight) - 0.5) * -18}px`);
+  }
+
   function endSwipe() {
     if (!swipeFingers) return;
     flush();
@@ -163,6 +179,7 @@
       fx.down(t.identifier, t.clientX, t.clientY);
     }
     gesture.max = Math.max(gesture.max, touches.size);
+    sheen();
   }
 
   function onMove(e) {
@@ -178,6 +195,7 @@
       fx.move(t.identifier, t.clientX, t.clientY);
     }
     if (!n) return;
+    sheen();
 
     const now = performance.now();
     const dt = now - lastMoveT;
@@ -223,6 +241,7 @@
     }
     // Lifting below three fingers ends a desktop gesture.
     if (swipeFingers && touches.size < 3) endSwipe();
+    sheen();
     if (touches.size > 0 || !gesture) return;
 
     document.body.classList.remove("touching");
@@ -296,6 +315,98 @@
       else input.value = settings[input.dataset.key];
       input.dispatchEvent(new Event("input"));
     }
+  });
+
+  // ---- keyboard ----------------------------------------------------------
+  // Typing goes through the phone's own keyboard (autocorrect, swipe typing,
+  // every language), into a small field. Each change to that field is
+  // replayed on the laptop: new characters are typed, removed ones become
+  // Backspace. A zero-width space sits at the start of the field, so even
+  // Backspace with nothing typed changes it and can be noticed.
+  const kbdBtn = document.getElementById("kbd");
+  const keysEl = document.getElementById("keys");
+  const typeEl = document.getElementById("type");
+  const field = typeEl.parentElement;
+  const SENTINEL = "\u200b";
+  const mods = new Set();
+  let typed = SENTINEL;
+
+  function resetField() {
+    typeEl.value = typed = SENTINEL;
+    const n = typeEl.value.length;
+    try { typeEl.setSelectionRange(n, n); } catch (_) {}
+    field.classList.add("empty");
+  }
+
+  function clearMods() {
+    mods.clear();
+    for (const b of keysEl.querySelectorAll("[data-mod]")) b.classList.remove("on");
+  }
+
+  function openKeys(open) {
+    keysEl.classList.toggle("open", open);
+    keysEl.setAttribute("aria-hidden", String(!open));
+    kbdBtn.setAttribute("aria-expanded", String(open));
+    if (open) {
+      resetField();
+      typeEl.focus({ preventScroll: true }); // brings up the phone's keyboard
+    } else {
+      typeEl.blur();
+      clearMods();
+    }
+  }
+
+  kbdBtn.addEventListener("click", () => openKeys(true));
+  document.getElementById("kbd-close").addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    openKeys(false);
+  });
+
+  for (const b of keysEl.querySelectorAll(".keyrow button")) {
+    b.addEventListener("pointerdown", (e) => {
+      e.preventDefault(); // keep focus in the field, so the phone keyboard stays up
+      b.classList.add("pressed");
+      setTimeout(() => b.classList.remove("pressed"), 180);
+      buzz(6);
+      const mod = b.dataset.mod;
+      if (mod) {
+        if (mods.has(mod)) mods.delete(mod); else mods.add(mod);
+        b.classList.toggle("on", mods.has(mod));
+        return;
+      }
+      flush(["key", b.dataset.key, [...mods]]);
+      clearMods();
+    });
+  }
+
+  typeEl.addEventListener("input", () => {
+    const now = typeEl.value;
+    let p = 0;
+    while (p < typed.length && p < now.length && typed[p] === now[p]) p++;
+    const removed = typed.length - p;
+    const added = now.slice(p);
+
+    if (mods.size && added) {
+      // Ctrl/Alt/Super armed: the next character is a shortcut, not text.
+      const combos = [...added].filter((c) => c.trim()).map((c) => ["key", c, [...mods]]);
+      flush(...combos);
+      clearMods();
+      typeEl.value = typed;
+      return;
+    }
+
+    const msgs = [];
+    for (let i = 0; i < removed; i++) msgs.push(["key", "backspace", []]);
+    if (added) msgs.push(["k", added]);
+    flush(...msgs);
+    typed = now;
+
+    // Start a fresh field after Enter, when the marker was deleted, or once a
+    // word is finished and the field is getting long.
+    if (!typed.startsWith(SENTINEL) || added.includes("\n") || (typed.length > 40 && /\s$/.test(typed))) {
+      resetField();
+    }
+    field.classList.toggle("empty", typed === SENTINEL);
   });
 
   // ---- light -------------------------------------------------------------

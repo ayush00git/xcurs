@@ -43,11 +43,18 @@ browser.
 | two-finger drag              | scroll                                 |
 | three-finger tap             | middle click                           |
 | three- or four-finger swipe  | your desktop's touchpad gestures       |
+| keyboard icon                | type, plus Esc, Tab, arrows, Ctrl/Alt/Super |
 
 Swipes with 3 or 4 fingers are played on a virtual touchpad, so the desktop
 handles them exactly like a laptop touchpad: on GNOME, 3 fingers switch
 workspaces or open the overview; on KDE Plasma, 4 fingers do. They need a
 Wayland session (X11 desktops mostly ignore touchpad gestures).
+
+**Typing:** tap the keyboard icon and type with your phone's own keyboard
+(autocorrect and swipe typing work). The glass keys above it add Esc, Tab, the
+arrows, Backspace, Enter, and sticky Ctrl/Alt/Super: tap Ctrl, then type `c`,
+for Ctrl+C. Typing assumes the laptop uses a US keyboard layout; other
+characters go through Ctrl+Shift+U, which GTK apps understand.
 
 Tap `···` for sensitivity, acceleration and scroll settings.
 

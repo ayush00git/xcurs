@@ -26,6 +26,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -254,6 +255,13 @@ class MainActivity : ComponentActivity() {
 
     private fun buildUi(): View {
         val root = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
+        // With the system bars hidden, Android won't shrink the page for the
+        // on-screen keyboard by itself. Do it here, so the touchpad's typing
+        // panel sits right above the keyboard instead of behind it.
+        ViewCompat.setOnApplyWindowInsetsListener(root) { v, insets ->
+            v.updatePadding(bottom = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom)
+            insets
+        }
 
         web = WebView(this).apply {
             setBackgroundColor(Color.BLACK)

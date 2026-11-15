@@ -122,3 +122,34 @@ connected to your laptop.
 Knocks are recognised in `KnockDetector.kt`: short, sharp spikes in the
 accelerometer, three in a row, starting while the phone is still. Walking and
 shaking don't count. Run its tests with `./gradlew test`.
+
+## Releases: install the app without building
+
+Every tag like `v0.5.0` makes GitHub Actions build a signed APK and attach it
+to a [GitHub Release](../../releases). On the phone: download it, tap it, and
+allow installing from this source.
+
+**One-time setup (the signing key).** Android only installs an update over an
+existing app if both are signed with the same key, so create one and keep it safe:
+
+```bash
+keytool -genkeypair -v -keystore xcurs-release.jks -alias xcurs -keyalg RSA -keysize 4096 -validity 10000
+```
+
+Then add four repository secrets (Settings → Secrets and variables → Actions):
+
+| Secret                    | Value                                  |
+|---------------------------|----------------------------------------|
+| `XCURS_KEYSTORE_BASE64`   | output of `base64 -w0 xcurs-release.jks` |
+| `XCURS_KEYSTORE_PASSWORD` | the keystore password                  |
+| `XCURS_KEY_ALIAS`         | `xcurs`                                |
+| `XCURS_KEY_PASSWORD`      | the key password                       |
+
+**Release:**
+
+```bash
+git tag v0.5.0 && git push origin v0.5.0
+```
+
+Without the secrets the workflow still works, but signs with a throwaway key,
+so each release would need an uninstall first.

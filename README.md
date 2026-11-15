@@ -108,22 +108,6 @@ If the app can't find the laptop, allow mDNS through the firewall
 then falls back to the last address that worked. Use `xcurs --no-mdns` to
 stop announcing.
 
-## V2.2: knock to open
-
-Knock three times on the back of your phone and xcurs opens, already
-connected to your laptop.
-
-- After the first pairing the app offers to turn it on. You can also add the
-  **xcurs knock** tile to Quick Settings and toggle it there.
-- Allow **Display over other apps** when asked: that's what lets Android open
-  xcurs from the background. Without it, a knock shows a notification to tap.
-- While it listens there's a small silent notification (Android requires one).
-  It only listens while the screen is on, and turns itself back on after a reboot.
-
-Knocks are recognised in `KnockDetector.kt`: short, sharp spikes in the
-accelerometer, three in a row, starting while the phone is still. Walking and
-shaking don't count. Run its tests with `./gradlew test`.
-
 ## Releases: install the app without building
 
 Every tag like `v0.5.0` makes GitHub Actions build a signed APK and attach it

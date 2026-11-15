@@ -15,8 +15,8 @@ android {
         applicationId = "io.github.ayush00git.xcurs"
         minSdk = 26
         targetSdk = 35
-        versionCode = System.getenv("XCURS_VERSION_CODE")?.toIntOrNull() ?: 3
-        versionName = System.getenv("XCURS_VERSION") ?: "0.6.0"
+        versionCode = System.getenv("XCURS_VERSION_CODE")?.toIntOrNull() ?: 4
+        versionName = System.getenv("XCURS_VERSION") ?: "0.7.0"
     }
 
     signingConfigs {
@@ -52,8 +52,6 @@ android {
 dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.activity:activity-ktx:1.9.3")
-    // The QR scanner pulls in an old Fragment; ActivityResult APIs need 1.3+.
-    implementation("androidx.fragment:fragment-ktx:1.8.5")
     // Google's QR scanner UI: no camera permission, no camera code in our app.
     implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
 

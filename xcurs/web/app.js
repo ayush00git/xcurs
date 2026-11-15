@@ -2,9 +2,21 @@
 (() => {
   "use strict";
 
+  // ---- settings ----------------------------------------------------------
+  // localStorage can be missing or throw (private mode), so every access is
+  // guarded and the defaults always work.
+  const store = {
+    get(k, d) {
+      try { const v = localStorage.getItem("xcurs." + k); return v === null ? d : JSON.parse(v); }
+      catch (_) { return d; }
+    },
+    set(k, v) { try { localStorage.setItem("xcurs." + k, JSON.stringify(v)); } catch (_) {} },
+  };
+  const DEFAULTS = { sens: 1.4, accel: 0.8, scroll: 1, natural: true, haptics: true };
+  const settings = { ...DEFAULTS, ...store.get("settings", {}) };
+
   // ---- tuning ------------------------------------------------------------
-  const GAIN = 1.6;            // phone px -> screen px
-  const PX_PER_NOTCH = 36;     // finger travel for one scroll notch
+  const PX_PER_NOTCH = 36;     // finger travel for one scroll notch, at scroll speed 1
   const TAP_MS = 230;          // a touch shorter than this...
   const TAP_SLOP = 10;         // ...that moved less than this (px) is a tap
   const DOUBLE_TAP_MS = 300;   // tap, then touch again within this -> drag
@@ -16,19 +28,46 @@
   let ws = null;
   let retryMs = 400;
 
+  // The QR code's URL carries the pairing token after "#t=". Keep it, then
+  // tidy it out of the address bar.
+  const fromUrl = location.hash.match(/[#&]t=([\w-]+)/);
+  const token = fromUrl ? fromUrl[1] : store.get("token", "");
+  if (fromUrl) {
+    store.set("token", token);
+    history.replaceState(null, "", location.pathname);
+  }
+  const q = `?t=${encodeURIComponent(token)}`;
+  // Scanning the QR again while this page is already open only changes the
+  // "#", which doesn't reload. Reload so the new token is picked up.
+  window.addEventListener("hashchange", () => location.reload());
+
+  function setStatus(state, label) {
+    statusEl.classList.toggle("live", state === "live");
+    statusEl.classList.toggle("unpaired", state === "unpaired");
+    statusLabel.textContent = label;
+  }
+
   function connect() {
     const proto = location.protocol === "https:" ? "wss" : "ws";
-    ws = new WebSocket(`${proto}://${location.host}/ws`);
+    let opened = false;
+    ws = new WebSocket(`${proto}://${location.host}/ws${q}`);
     ws.onopen = () => {
+      opened = true;
       retryMs = 400;
-      statusEl.classList.add("live");
-      statusLabel.textContent = "connected";
+      setStatus("live", "connected");
     };
-    ws.onclose = () => {
-      statusEl.classList.remove("live");
-      statusLabel.textContent = "connecting";
-      setTimeout(connect, retryMs);
+    ws.onclose = async () => {
+      let delay = retryMs;
       retryMs = Math.min(retryMs * 2, 4000);
+      setStatus("", "connecting");
+      if (!opened) {
+        // Refused before it opened: ask the laptop whether it's our token.
+        try {
+          const r = await fetch(`/check${q}`, { cache: "no-store" });
+          if (r.status === 401) { setStatus("unpaired", "scan the qr to pair"); delay = 4000; }
+        } catch (_) {}
+      }
+      setTimeout(connect, delay);
     };
     ws.onerror = () => ws.close();
   }
@@ -50,18 +89,31 @@
     }
   }
   const round2 = (v) => Math.round(v * 100) / 100;
-  const buzz = (ms) => { try { navigator.vibrate && navigator.vibrate(ms); } catch (_) {} };
+  const buzz = (ms) => {
+    if (!settings.haptics) return;
+    try { navigator.vibrate && navigator.vibrate(ms); } catch (_) {}
+  };
 
   // ---- gestures ----------------------------------------------------------
   const touches = new Map();   // id -> {x, y}
   let gesture = null;          // the current run of touches, first down to last up
   let lastTap = null;          // {t, x, y} of the last one-finger tap
   let dragging = false;
+  let lastMoveT = 0;
+
+  // Pointer acceleration: slow fingers get exactly the base sensitivity, for
+  // precision; fast flicks get extra gain, so one swipe can cross the screen.
+  function gainFor(dist, dt) {
+    const speed = dist / Math.max(dt, 1);              // px per ms
+    const boost = Math.max(0, Math.min(speed, 3) - 0.15);
+    return settings.sens * (1 + settings.accel * boost);
+  }
 
   function onStart(e) {
     e.preventDefault();
     document.body.classList.add("touching", "used");
     const now = performance.now();
+    lastMoveT = now;
 
     for (const t of e.changedTouches) {
       if (touches.size === 0) {
@@ -94,17 +146,23 @@
     }
     if (!n) return;
 
+    const now = performance.now();
+    const dt = now - lastMoveT;
+    lastMoveT = now;
+
     if (touches.size >= 2) {
-      // Two fingers: scroll by their average motion, "natural" direction
-      // (content follows the fingers). Kernel signs: +y is up, +x is right.
-      scrollY += (sy / n) / PX_PER_NOTCH;
-      scrollX -= (sx / n) / PX_PER_NOTCH;
+      // Two fingers: scroll by their average motion. "Natural" means the
+      // content follows the fingers. Kernel signs: +y is up, +x is right.
+      const k = (settings.natural ? 1 : -1) * settings.scroll / PX_PER_NOTCH;
+      scrollY += (sy / n) * k;
+      scrollX -= (sx / n) * k;
       fx.scroll(sy / n);
     } else if (gesture.max === 1 || dragging) {
       // One finger moves the cursor, but only if this gesture never had a
       // second finger: lifting one finger of a scroll shouldn't jerk the cursor.
-      moveX += sx * GAIN;
-      moveY += sy * GAIN;
+      const g = gainFor(Math.hypot(sx, sy), dt);
+      moveX += sx * g;
+      moveY += sy * g;
     }
   }
 
@@ -146,6 +204,42 @@
   pad.addEventListener("touchcancel", onEnd, { passive: false });
   document.addEventListener("gesturestart", (e) => e.preventDefault()); // iOS pinch-zoom
   document.addEventListener("contextmenu", (e) => e.preventDefault());
+
+  // ---- settings sheet ----------------------------------------------------
+  const sheet = document.getElementById("sheet");
+  const menu = document.getElementById("menu");
+
+  function openSheet(open) {
+    sheet.classList.toggle("open", open);
+    sheet.setAttribute("aria-hidden", String(!open));
+    menu.setAttribute("aria-expanded", String(open));
+  }
+  menu.addEventListener("click", () => openSheet(!sheet.classList.contains("open")));
+  sheet.addEventListener("click", (e) => { if (e.target === sheet) openSheet(false); });
+  document.getElementById("done").addEventListener("click", () => openSheet(false));
+
+  for (const input of sheet.querySelectorAll("[data-key]")) {
+    const key = input.dataset.key;
+    const out = sheet.querySelector(`[data-out="${key}"]`);
+    const show = () => { if (out) out.textContent = Number(settings[key]).toFixed(1); };
+    if (input.type === "checkbox") input.checked = settings[key];
+    else input.value = settings[key];
+    show();
+    input.addEventListener("input", () => {
+      settings[key] = input.type === "checkbox" ? input.checked : Number(input.value);
+      store.set("settings", settings);
+      show();
+    });
+  }
+  document.getElementById("reset").addEventListener("click", () => {
+    Object.assign(settings, DEFAULTS);
+    store.set("settings", settings);
+    for (const input of sheet.querySelectorAll("[data-key]")) {
+      if (input.type === "checkbox") input.checked = settings[input.dataset.key];
+      else input.value = settings[input.dataset.key];
+      input.dispatchEvent(new Event("input"));
+    }
+  });
 
   // ---- light -------------------------------------------------------------
   // Everything is drawn on one canvas: a soft glow under each finger, a

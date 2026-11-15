@@ -1,11 +1,19 @@
 name: Android release
 
-# Push a tag like v0.5.0 to build a signed APK and attach it to a GitHub
-# Release. "Run workflow" (manual) builds one too, as a downloadable artifact.
+# Two ways to release a signed APK on GitHub Releases:
+#   - push a tag like v0.6.0, or
+#   - Actions -> Android release -> Run workflow, and type a version (0.6.0):
+#     the tag and the release are created for you.
+# "Run workflow" with no version just builds the APK as a downloadable artifact.
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version, e.g. 0.6.0 (leave empty to only build)"
+        required: false
+        default: ""
 
 permissions:
   contents: write # create the release and upload the APK
@@ -45,27 +53,41 @@ jobs:
           XCURS_KEYSTORE_PASSWORD: ${{ secrets.XCURS_KEYSTORE_PASSWORD }}
           XCURS_KEY_ALIAS: ${{ secrets.XCURS_KEY_ALIAS }}
           XCURS_KEY_PASSWORD: ${{ secrets.XCURS_KEY_PASSWORD }}
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
           if [ "$GITHUB_REF_TYPE" = tag ]; then
-            export XCURS_VERSION="${GITHUB_REF_NAME#v}"
-            NAME="xcurs-${GITHUB_REF_NAME}.apk"
+            TAG="$GITHUB_REF_NAME"
+          elif [ -n "$INPUT_VERSION" ]; then
+            TAG="v${INPUT_VERSION#v}"
+          else
+            TAG=""
+          fi
+          if [ -n "$TAG" ]; then
+            if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+              echo "::error::'$TAG' isn't a version like v0.6.0"; exit 1
+            fi
+            export XCURS_VERSION="${TAG#v}"
+            NAME="xcurs-${TAG}.apk"
           else
             NAME="xcurs-${GITHUB_SHA::7}.apk"
           fi
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
           export XCURS_VERSION_CODE=$((GITHUB_RUN_NUMBER + 10))
           ./gradlew assembleRelease
           cp app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/$NAME"
           echo "APK=$RUNNER_TEMP/$NAME" >> "$GITHUB_ENV"
 
       - name: Attach to GitHub Release
-        if: github.ref_type == 'tag'
+        if: env.TAG != ''
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.TAG }}
+          target_commitish: ${{ github.sha }}
           files: ${{ env.APK }}
           generate_release_notes: true
 
       - name: Upload as artifact
-        if: github.ref_type != 'tag'
+        if: env.TAG == ''
         uses: actions/upload-artifact@v4
         with:
           name: xcurs-apk
